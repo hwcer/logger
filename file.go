@@ -1,270 +1,118 @@
 package logger
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-func NewFileAdapter(filename string) *FileAdapter {
-	f := &FileAdapter{
-		Level:      LevelDebug,
-		Daily:      true,
-		MaxDays:    30,
-		Append:     true,
-		PermitMask: "0777",
-		MaxLines:   0,
-		MaxSize:    10 * 1024 * 1024,
-		Filename:   filename,
-	}
-	return f
+type fileNameFormatter func() (name string, expire time.Duration)
+
+// defaultFileNameFormatter 默认日志文件,每日一份
+func defaultFileNameFormatter() (name string, expire time.Duration) {
+	t := time.Now()
+	r := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
+	name = t.Format("20060102")
+	expire = time.Duration(r.Unix()-t.Unix()) * time.Second
+	return
 }
 
-type FileAdapter struct {
-	sync.RWMutex
-	fileWriter           *os.File
-	maxSizeCurSize       int
-	maxLinesCurLines     int
-	dailyOpenDate        int
-	dailyOpenTime        time.Time
-	fileNameOnly, suffix string
-
-	Level      int                   `json:"level"`
-	Append     bool                  `json:"append"`
-	MaxLines   int                   `json:"maxlines"`
-	MaxSize    int                   `json:"maxsize"`
-	Daily      bool                  `json:"daily"`
-	MaxDays    int64                 `json:"maxdays"`
-	PermitMask string                `json:"permit"`
-	Filename   string                `json:"filename"`
-	Format     func(*Message) string `json:"_"`
+func NewFile(path string) *File {
+	return &File{logsPath: path, FileName: defaultFileNameFormatter}
 }
 
-func (f *FileAdapter) Init() error {
-	if f.Level < 0 || f.Level > len(levelPrefix) {
-		return errorLevelInvalid
-	}
-	if len(f.Filename) == 0 {
-		return errors.New("must have filename")
-	}
-	f.suffix = filepath.Ext(f.Filename)
-	f.fileNameOnly = strings.TrimSuffix(f.Filename, f.suffix)
-	f.MaxSize *= 1024 * 1024 // 将单位转换成MB
-	if f.suffix == "" {
-		f.suffix = ".log"
-	}
-	return f.newFile()
+type File struct {
+	file     *os.File
+	logsPath string                //日志目录
+	Sprintf  func(*Message) string //格式化message
+	FileName fileNameFormatter     //日志文件名
+	//Formatter         func([]any) []byte //将参数格式化成日志
 }
 
-func (f *FileAdapter) needCreateFresh(size int, day int) bool {
-	return (f.MaxLines > 0 && f.maxLinesCurLines >= f.MaxLines) ||
-		(f.MaxSize > 0 && f.maxSizeCurSize+size >= f.MaxSize) ||
-		(f.Daily && day != f.dailyOpenDate)
+func (this *File) Init() (err error) {
+	f, err := os.Stat(this.logsPath)
+	if err != nil {
+		return err
+	}
+	if !f.IsDir() {
+		return fmt.Errorf("path not dir:%v", this.logsPath)
+	}
+	if err = this.mayCreateFile(); err != nil {
+		return
+	}
+	return
 }
 
-// WriteMsg write adapter message into file.
-func (f *FileAdapter) Write(msg *Message, level int) error {
-	if level < f.Level {
-		return nil
+func (this *File) Write(msg *Message) (err error) {
+	if this.file == nil {
+		return errors.New("file handle empty")
 	}
 	var txt string
-	if f.Format != nil {
-		txt = f.Format(msg)
+	if this.Sprintf != nil {
+		txt = this.Sprintf(msg)
 	} else {
 		txt = msg.String()
 	}
-	if level >= LevelError {
-		txt = txt + "\n" + msg.Stack
+	if msg.Level >= LevelError {
+		txt = strings.Join([]string{txt, msg.Stack}, "\n")
 	}
-
-	day := msg.Time.Day()
-	txt += "\n"
-	if f.Append {
-		f.RLock()
-		if f.needCreateFresh(len(txt), day) {
-			f.RUnlock()
-			f.Lock()
-			if f.needCreateFresh(len(txt), day) {
-				if err := f.createFreshFile(msg.Time); err != nil {
-					fmt.Fprintf(os.Stderr, "createFreshFile(%q): %s\n", f.Filename, err)
-				}
-			}
-			f.Unlock()
-		} else {
-			f.RUnlock()
-		}
-	}
-
-	f.Lock()
-	_, err := f.fileWriter.Write([]byte(txt))
-	if err == nil {
-		f.maxLinesCurLines++
-		f.maxSizeCurSize += len(txt)
-	}
-	f.Unlock()
-	return err
+	_, err = this.file.Write([]byte(txt))
+	return
 }
 
-func (f *FileAdapter) createLogFile() (*os.File, error) {
+func (this *File) timer() {
+	_ = this.mayCreateFile()
+}
+func (this *File) mayCreateFile() (err error) {
 	// Open the log file
-	perm, err := strconv.ParseInt(f.PermitMask, 8, 64)
-	if err != nil {
-		return nil, err
-	}
-	fd, err := os.OpenFile(f.Filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
-	if err == nil {
-		// Make sure file perm is user set perm cause of `os.OpenFile` will obey umask
-		os.Chmod(f.Filename, os.FileMode(perm))
-	}
-	return fd, err
-}
-
-func (f *FileAdapter) newFile() error {
-	file, err := f.createLogFile()
-	if err != nil {
-		return err
-	}
-	if f.fileWriter != nil {
-		f.fileWriter.Close()
-	}
-	f.fileWriter = file
-
-	fInfo, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("get stat err: %s", err)
-	}
-	f.maxSizeCurSize = int(fInfo.Size())
-	f.dailyOpenTime = time.Now()
-	f.dailyOpenDate = f.dailyOpenTime.Day()
-	f.maxLinesCurLines = 0
-	if f.maxSizeCurSize > 0 {
-		count, err := f.lines()
-		if err != nil {
-			return err
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf("%v", e)
 		}
-		f.maxLinesCurLines = count
-	}
-	return nil
-}
+	}()
+	name, expire := this.FileName()
+	defer func() {
+		time.AfterFunc(expire, this.timer)
+	}()
 
-func (f *FileAdapter) lines() (int, error) {
-	fd, err := os.Open(f.Filename)
+	if name == filepath.Base(this.file.Name()) {
+		return nil
+	}
+	var perm int64
+	perm, err = strconv.ParseInt("0777", 8, 64)
 	if err != nil {
-		return 0, err
-	}
-	defer fd.Close()
-
-	buf := make([]byte, 32768) // 32k
-	count := 0
-	lineSep := []byte{'\n'}
-
-	for {
-		c, err := fd.Read(buf)
-		if err != nil && err != io.EOF {
-			return count, err
-		}
-
-		count += bytes.Count(buf[:c], lineSep)
-
-		if err == io.EOF {
-			break
-		}
-	}
-
-	return count, nil
-}
-
-// new file name like  xx.2013-01-01.001.log
-func (f *FileAdapter) createFreshFile(logTime time.Time) error {
-	// file exists
-	// match the next available number
-	num := 1
-	fName := ""
-	rotatePerm, err := strconv.ParseInt(f.PermitMask, 8, 64)
-	if err != nil {
-		return err
-	}
-
-	_, err = os.Lstat(f.Filename)
-	if err != nil {
-		// 初始日志文件不存在，无需创建新文件
-		goto RESTART_LOGGER
-	}
-	// 日期变了， 说明跨天，重命名时需要保存为昨天的日期
-	if f.dailyOpenDate != logTime.Day() {
-		for ; err == nil && num <= 999; num++ {
-			fName = f.fileNameOnly + fmt.Sprintf(".%s.%03d%s", f.dailyOpenTime.Format("2006-01-02"), num, f.suffix)
-			_, err = os.Lstat(fName)
-		}
-	} else { //如果仅仅是文件大小或行数达到了限制，仅仅变更后缀序号即可
-		for ; err == nil && num <= 999; num++ {
-			fName = f.fileNameOnly + fmt.Sprintf(".%s.%03d%s", logTime.Format("2006-01-02"), num, f.suffix)
-			_, err = os.Lstat(fName)
-		}
-	}
-
-	if err == nil {
-		return fmt.Errorf("Cannot find free log number to rename %s", f.Filename)
-	}
-	f.fileWriter.Close()
-
-	// 当创建新文件标记为true时
-	// 当日志文件超过最大限制行
-	// 当日志文件超过最大限制字节
-	// 当日志文件隔天更新标记为true时
-	// 将旧文件重命名，然后创建新文件
-	err = os.Rename(f.Filename, fName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "os.Rename %s to %s err:%s\n", f.Filename, fName, err.Error())
-		goto RESTART_LOGGER
-	}
-
-	err = os.Chmod(fName, os.FileMode(rotatePerm))
-
-RESTART_LOGGER:
-
-	startLoggerErr := f.newFile()
-	go f.deleteOldLog()
-
-	if startLoggerErr != nil {
-		return fmt.Errorf("Rotate StartLogger: %s", startLoggerErr)
-	}
-	if err != nil {
-		return fmt.Errorf("Rotate: %s", err)
-	}
-	return nil
-}
-
-func (f *FileAdapter) deleteOldLog() {
-	dir := filepath.Dir(f.Filename)
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) (returnErr error) {
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Fprintf(os.Stderr, "Unable to delete old log '%s', error: %v\n", path, r)
-			}
-		}()
-
-		if info == nil {
-			return
-		}
-
-		if f.MaxDays != -1 && !info.IsDir() && info.ModTime().Add(24*time.Hour*time.Duration(f.MaxDays)).Before(time.Now()) {
-			if strings.HasPrefix(filepath.Base(path), filepath.Base(f.fileNameOnly)) &&
-				strings.HasSuffix(filepath.Base(path), f.suffix) {
-				os.Remove(path)
-			}
-		}
 		return
-	})
+	}
+	path := filepath.Join(this.logsPath, name)
+	fd, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
+	if err != nil {
+		return err
+	}
+	_ = os.Chmod(path, os.FileMode(perm))
+	if err = fd.Sync(); err != nil {
+		return
+	}
+	var old *os.File
+	old, this.file = this.file, fd
+	if old != nil {
+		time.AfterFunc(5*time.Second, func() {
+			_ = old.Close()
+		})
+	}
+	return
 }
 
-func (f *FileAdapter) Close() {
-	f.fileWriter.Close()
+func (this *File) pathExists(path string) error {
+	f, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !f.IsDir() {
+		return fmt.Errorf("path not dir:%v", path)
+	}
+	return nil
 }

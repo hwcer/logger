@@ -1,43 +1,46 @@
 package logger
 
-import "fmt"
+const DefaultConsoleName = "_defaultConsoleName"
 
-const DefTimeFormat = "2006-01-02 15:04:05 -0700" // 日志输出默认格式
-
-var errorLevelInvalid = fmt.Errorf("无效的日志等级")
-var DefaultLogger *Logger
-var DefaultAdapter Adapter
+var defaultLogger *Logger
 
 func init() {
-	DefaultLogger = New(3)
-	DefaultAdapter = NewConsoleAdapter()
-	_ = DefaultLogger.Adapter(DefaultAdapter)
+	defaultLogger = New(3)
+	_ = defaultLogger.SetOutput(DefaultConsoleName, NewConsole())
 }
 
-func Alert(f interface{}, v ...interface{}) {
-	DefaultLogger.Alert(f, v...)
+func Default() *Logger {
+	return defaultLogger
 }
 
-func Fatal(f interface{}, v ...interface{}) {
-	DefaultLogger.Fatal(f, v...)
+func Fatal(f any, v ...any) {
+	defaultLogger.Fatal(f, v...)
+}
+func Panic(f any, v ...any) {
+	defaultLogger.Panic(f, v...)
+}
+func Error(f any, v ...any) {
+	defaultLogger.Error(f, v...)
 }
 
-func Error(f interface{}, v ...interface{}) {
-	DefaultLogger.Error(f, v...)
+func Alert(f any, v ...any) {
+	defaultLogger.Alert(f, v...)
 }
 
-func Warn(f interface{}, v ...interface{}) {
-	DefaultLogger.Warn(f, v...)
+// Warn 废弃
+func Warn(f any, v ...any) {
+	defaultLogger.Alert(f, v...)
 }
 
-func Info(f interface{}, v ...interface{}) {
-	DefaultLogger.Info(f, v...)
+// Info 废弃
+func Info(f any, v ...any) {
+	defaultLogger.Alert(f, v...)
 }
 
-func Debug(f interface{}, v ...interface{}) {
-	DefaultLogger.Debug(f, v...)
+func Debug(f any, v ...any) {
+	defaultLogger.Debug(f, v...)
 }
 
-func Trace(f interface{}, v ...interface{}) {
-	DefaultLogger.Trace(f, v...)
+func Trace(f any, v ...any) {
+	defaultLogger.Trace(f, v...)
 }

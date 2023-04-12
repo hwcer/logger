@@ -3,78 +3,47 @@ package logger
 import (
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 )
 
-type brush func(string) string
-
-func newBrush(color string) brush {
-	pre := "\033["
-	reset := "\033[0m"
-	return func(text string) string {
-		return pre + color + "m" + text + reset
-	}
+func NewConsole() *Console {
+	return &Console{colorful: true}
 }
 
-//鉴于终端的通常使用习惯，一般白色和黑色字体是不可行的,所以30,37不可用，
-var colors = []brush{
-	newBrush("1;32"), // Trace              绿色
-	newBrush("1;32"), // Debug              绿色
-	newBrush("1;36"), // Info              天蓝色
-	newBrush("1;33"), // Warn               黄色
-	newBrush("1;31"), // Error              红色
-	newBrush("1;34"), // Alert              蓝色
-	newBrush("1;35"), // FATAL              紫色
-	newBrush("1;41"), // Emergency          红色底
-}
-
-func NewConsoleAdapter() *ConsoleAdapter {
-	return &ConsoleAdapter{Colorful: true, Level: LevelDebug}
-}
-
-type ConsoleAdapter struct {
+type Console struct {
 	sync.Mutex
-	Level    int
-	Format   func(*Message) string
-	Colorful bool
+	Sprintf  func(*Message) string
+	colorful bool
 }
 
-func (c *ConsoleAdapter) Init() (err error) {
-	if c.Level < 0 || c.Level > len(levelPrefix) {
-		return errorLevelInvalid
-	}
+func (c *Console) Init() (err error) {
 	if runtime.GOOS == "windows" {
-		c.Colorful = false
+		c.colorful = false
 	}
 	return
 }
 
-func (c *ConsoleAdapter) Write(msg *Message, level int) error {
-	if level < c.Level {
-		return nil
-	}
+func (c *Console) Write(msg *Message) error {
 	var txt string
-	if c.Format != nil {
-		txt = c.Format(msg)
+	level := msg.Level
+	if c.Sprintf != nil {
+		txt = c.Sprintf(msg)
 	} else {
 		txt = msg.String()
 	}
-	if c.Colorful {
-		txt = colors[level](txt)
+	if c.colorful {
+		txt = level.Brush(txt)
 	}
 	if level >= LevelError {
-		txt = txt + "\n" + msg.Stack
+		txt = strings.Join([]string{txt, msg.Stack}, "\n")
 	}
-	c.printlnConsole(txt)
-	return nil
+	return c.printlnConsole(txt)
 }
 
-func (c *ConsoleAdapter) Close() {
-
-}
-
-func (c *ConsoleAdapter) printlnConsole(msg string) {
+func (c *Console) printlnConsole(msg string) (err error) {
 	c.Lock()
 	defer c.Unlock()
-	os.Stdout.Write(append([]byte(msg), '\n'))
+	_, err = os.Stdout.Write(append([]byte(msg), '\n'))
+	return
 }
