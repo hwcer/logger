@@ -12,19 +12,19 @@ type Level int8
 // 日志等级，从0-7，日优先级由高到低
 const (
 	LevelDebug Level = 0 // 用户级调试
-	LevelTrace       = 1 // 用户级基本输出
-	LevelAlert       = 2
-	LevelError       = 7 // 用户级错误
-	LevelPanic       = 8 //Panic
-	LevelFATAL       = 9 //PANIC
+	LevelTrace Level = 1 // 用户级基本输出
+	LevelAlert Level = 2 //一般性警告
+	LevelError Level = 7 // 用户级错误
+	LevelPanic Level = 8 //Panic
+	LevelFATAL Level = 9 //PANIC
 )
 
 // 日志记录等级字段
 var levelPrefix = map[Level]string{
 	LevelDebug: "DEBUG",
 	LevelTrace: "TRACE",
-	LevelError: "ERROR",
 	LevelAlert: "ALERT",
+	LevelError: "ERROR",
 	LevelPanic: "PANIC",
 	LevelFATAL: "FATAL",
 }
