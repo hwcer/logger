@@ -27,16 +27,6 @@ func Alert(f any, v ...any) {
 	defaultLogger.Alert(f, v...)
 }
 
-// Warn 废弃
-func Warn(f any, v ...any) {
-	defaultLogger.Alert(f, v...)
-}
-
-// Info 废弃
-func Info(f any, v ...any) {
-	defaultLogger.Alert(f, v...)
-}
-
 func Debug(f any, v ...any) {
 	defaultLogger.Debug(f, v...)
 }
