@@ -55,7 +55,7 @@ func (this *Logger) writeMsg(level Level, format any, args ...any) {
 	if level < this.level {
 		return
 	}
-	this.Write(&Message{Content: this.Sprintf(format, args...), Level: level})
+	this.Write(&Message{Content: Sprintf(format, args...), Level: level})
 }
 
 func (this *Logger) Fatal(format any, args ...any) {
@@ -65,7 +65,7 @@ func (this *Logger) Fatal(format any, args ...any) {
 
 func (this *Logger) Panic(format any, args ...any) {
 	this.writeMsg(LevelPanic, format, args...)
-	panic(this.Sprintf(format, args...))
+	panic(Sprintf(format, args...))
 }
 
 // Error Log ERROR level message.
@@ -84,20 +84,6 @@ func (this *Logger) Debug(format interface{}, v ...interface{}) {
 // Trace Log TRAC level message.
 func (this *Logger) Trace(format interface{}, v ...interface{}) {
 	this.writeMsg(LevelTrace, format, v...)
-}
-func (this *Logger) Sprintf(format any, args ...any) (text string) {
-	switch v := format.(type) {
-	case string:
-		text = v
-	case error:
-		text = v.Error()
-	default:
-		text = fmt.Sprintf("%v", format)
-	}
-	if len(args) > 0 {
-		text = fmt.Sprintf(text, args...)
-	}
-	return
 }
 
 // SetLevel 设置日志输出等级

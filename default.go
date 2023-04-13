@@ -1,5 +1,7 @@
 package logger
 
+import "fmt"
+
 const DefaultConsoleName = "_defaultConsoleName"
 
 var defaultLogger *Logger
@@ -33,4 +35,37 @@ func Debug(f any, v ...any) {
 
 func Trace(f any, v ...any) {
 	defaultLogger.Trace(f, v...)
+}
+
+// SetLevel 设置日志输出等级
+func SetLevel(level Level) {
+	defaultLogger.SetLevel(level)
+}
+
+// SetPathTrim 设置日志起始路径
+func SetPathTrim(trimPath string) {
+	defaultLogger.SetPathTrim(trimPath)
+}
+
+func SetCallDepth(depth int) {
+	defaultLogger.SetCallDepth(depth)
+}
+
+func SetOutput(name string, output Output) error {
+	return defaultLogger.SetOutput(name, output)
+}
+
+func Sprintf(format any, args ...any) (text string) {
+	switch v := format.(type) {
+	case string:
+		text = v
+	case error:
+		text = v.Error()
+	default:
+		text = fmt.Sprintf("%v", format)
+	}
+	if len(args) > 0 {
+		text = fmt.Sprintf(text, args...)
+	}
+	return
 }
