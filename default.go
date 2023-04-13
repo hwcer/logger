@@ -1,14 +1,17 @@
 package logger
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
-const DefaultConsoleName = "_defaultConsoleName"
+const defaultConsoleName = "_defaultConsoleName"
 
 var defaultLogger *Logger
 
 func init() {
 	defaultLogger = New(3)
-	_ = defaultLogger.SetOutput(DefaultConsoleName, NewConsole())
+	_ = defaultLogger.SetOutput(defaultConsoleName, Console)
 }
 
 func Default() *Logger {
@@ -52,6 +55,9 @@ func SetCallDepth(depth int) {
 }
 
 func SetOutput(name string, output Output) error {
+	if name != defaultConsoleName {
+		return errors.New("output name disable")
+	}
 	return defaultLogger.SetOutput(name, output)
 }
 

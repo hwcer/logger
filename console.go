@@ -7,24 +7,29 @@ import (
 	"sync"
 )
 
-func NewConsole() *Console {
-	return &Console{colorful: true}
+var Console = &console{colorful: true}
+
+func init() {
+	//简化默认控制台输出
+	Console.Sprintf = func(message *Message) string {
+		return message.Content
+	}
 }
 
-type Console struct {
+type console struct {
 	sync.Mutex
 	Sprintf  func(*Message) string
 	colorful bool
 }
 
-func (c *Console) Init() (err error) {
+func (c *console) Init() (err error) {
 	if runtime.GOOS == "windows" {
 		c.colorful = false
 	}
 	return
 }
 
-func (c *Console) Write(msg *Message) error {
+func (c *console) Write(msg *Message) error {
 	var txt string
 	level := msg.Level
 	if c.Sprintf != nil {
@@ -41,7 +46,7 @@ func (c *Console) Write(msg *Message) error {
 	return c.printlnConsole(txt)
 }
 
-func (c *Console) printlnConsole(msg string) (err error) {
+func (c *console) printlnConsole(msg string) (err error) {
 	c.Lock()
 	defer c.Unlock()
 	_, err = os.Stdout.Write(append([]byte(msg), '\n'))

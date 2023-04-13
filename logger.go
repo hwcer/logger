@@ -33,7 +33,7 @@ func (this *Logger) Write(msg *Message) {
 		msg.Time = time.Now()
 	}
 	if this.callDepth > 0 && msg.Path == "" {
-		_, file, lineno, ok := runtime.Caller(3)
+		_, file, lineno, ok := runtime.Caller(this.callDepth)
 		if ok {
 			if this.usePath != "" {
 				file = stringTrim(file, this.usePath)
