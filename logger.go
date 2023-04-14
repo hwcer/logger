@@ -14,7 +14,7 @@ import (
 type Logger struct {
 	mutex     sync.Mutex
 	level     Level
-	usePath   string
+	usePath   []string
 	outputs   map[string]Output
 	callDepth int
 }
@@ -33,11 +33,8 @@ func (this *Logger) Write(msg *Message) {
 		msg.Time = time.Now()
 	}
 	if this.callDepth > 0 && msg.Path == "" {
-		_, file, lineno, ok := runtime.Caller(this.callDepth)
-		if ok {
-			if this.usePath != "" {
-				file = stringTrim(file, this.usePath)
-			}
+		if _, file, lineno, ok := runtime.Caller(this.callDepth); ok {
+			file = this.TrimPath(file)
 			msg.Path = strings.Replace(fmt.Sprintf("%s:%d", file, lineno), "%2e", ".", -1)
 		}
 	}
@@ -92,18 +89,27 @@ func (this *Logger) SetLevel(level Level) {
 }
 
 // SetPathTrim 设置日志起始路径
-func (this *Logger) SetPathTrim(trimPath string) {
-	this.usePath = filepath.ToSlash(trimPath)
+func (this *Logger) SetPathTrim(trimPath ...string) {
+	for _, p := range trimPath {
+		this.usePath = append(this.usePath, filepath.ToSlash(p))
+	}
 }
 
 func (this *Logger) SetCallDepth(depth int) {
 	this.callDepth = depth
 }
 
-func stringTrim(s string, cut string) string {
-	ss := strings.SplitN(s, cut, 2)
-	if 1 == len(ss) {
-		return ss[0]
+func (this *Logger) TrimPath(s string) (r string) {
+	if len(this.usePath) == 0 {
+		return s
 	}
-	return ss[1]
+	r = s
+	for _, p := range this.usePath {
+		arr := strings.SplitN(r, p, 2)
+		if len(arr) == 2 {
+			arr[0] = p
+			r = strings.Join(arr, "")
+		}
+	}
+	return
 }

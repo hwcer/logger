@@ -46,8 +46,8 @@ func SetLevel(level Level) {
 }
 
 // SetPathTrim 设置日志起始路径
-func SetPathTrim(trimPath string) {
-	defaultLogger.SetPathTrim(trimPath)
+func SetPathTrim(trimPath ...string) {
+	defaultLogger.SetPathTrim(trimPath...)
 }
 
 func SetCallDepth(depth int) {
@@ -55,7 +55,7 @@ func SetCallDepth(depth int) {
 }
 
 func SetOutput(name string, output Output) error {
-	if name != defaultConsoleName {
+	if name == defaultConsoleName {
 		return errors.New("output name disable")
 	}
 	return defaultLogger.SetOutput(name, output)
