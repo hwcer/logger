@@ -12,11 +12,11 @@ import (
 
 type fileNameFormatter func() (name string, expire time.Duration)
 
-// defaultFileNameFormatter 默认日志文件,每日一份
-func defaultFileNameFormatter() (name string, expire time.Duration) {
+// DefaultFileNameFormatter 默认日志文件,每日一份
+func DefaultFileNameFormatter() (name string, expire time.Duration) {
 	t := time.Now()
 	r := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
-	name = t.Format("20060102") + ".log"
+	name = t.Format("20060102")
 	expire = time.Duration(r.Unix()-t.Unix()) * time.Second
 	return
 }
@@ -27,24 +27,20 @@ func NewFile(path string) *File {
 
 type File struct {
 	file     *os.File
-	fileName any                   //日志文件名
+	fileName fileNameFormatter     //
 	logsPath string                //日志目录
 	Sprintf  func(*Message) string //格式化message
 }
 
-func (this *File) getFileName() (name string, expire time.Duration) {
-	if f, ok := this.fileName.(fileNameFormatter); ok {
-		return f()
+func (this *File) GetFileName() (name string, expire time.Duration) {
+	if this.fileName != nil {
+		return this.fileName()
 	}
-	name, expire = defaultFileNameFormatter()
-	if prefix, ok := this.fileName.(string); ok {
-		name = prefix + name
-	}
-	return
+	return DefaultFileNameFormatter()
 }
 
 // SetFileName 设置日志文件名,  前缀(string) 或者 fileNameFormatter
-func (this *File) SetFileName(f any) {
+func (this *File) SetFileName(f fileNameFormatter) {
 	this.fileName = f
 }
 
@@ -92,7 +88,7 @@ func (this *File) mayCreateFile() (err error) {
 			err = fmt.Errorf("%v", e)
 		}
 	}()
-	name, expire := this.getFileName()
+	name, expire := this.GetFileName()
 	defer func() {
 		time.AfterFunc(expire, this.timer)
 	}()
