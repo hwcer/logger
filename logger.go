@@ -29,6 +29,9 @@ func New(depth ...int) *Logger {
 }
 
 func (this *Logger) Write(msg *Message) {
+	defer func() {
+		_ = recover()
+	}()
 	if msg.Time.IsZero() {
 		msg.Time = time.Now()
 	}
