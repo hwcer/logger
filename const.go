@@ -56,6 +56,6 @@ type Interface interface {
 	Panic(format any, args ...any) //抛出Panic
 	Error(format any, args ...any)
 	Alert(format any, args ...any)
-	Debug(format any, args ...any)
 	Trace(format any, args ...any)
+	Debug(format any, args ...any)
 }

@@ -12,6 +12,9 @@ var defaultLogger *Logger
 func init() {
 	defaultLogger = New(3)
 	_ = defaultLogger.SetOutput(defaultConsoleName, Console)
+	//if err := syscall.Dup2(int(f.Fd()), int(os.Stderr.Fd())); err != nil {
+	//	panic(err)
+	//}
 }
 
 func Default() *Logger {

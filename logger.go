@@ -32,6 +32,9 @@ func (this *Logger) Write(msg *Message) {
 	defer func() {
 		_ = recover()
 	}()
+	if msg.Level < this.level {
+		return
+	}
 	if msg.Time.IsZero() {
 		msg.Time = time.Now()
 	}
@@ -51,39 +54,36 @@ func (this *Logger) Write(msg *Message) {
 	}
 }
 
-func (this *Logger) writeMsg(level Level, format any, args ...any) {
-	if level < this.level {
-		return
-	}
+func (this *Logger) Sprint(level Level, format any, args ...any) {
 	this.Write(&Message{Content: Sprintf(format, args...), Level: level})
 }
 
 func (this *Logger) Fatal(format any, args ...any) {
-	this.writeMsg(LevelFATAL, format, args...)
+	this.Sprint(LevelFATAL, format, args...)
 	os.Exit(1)
 }
 
 func (this *Logger) Panic(format any, args ...any) {
-	this.writeMsg(LevelPanic, format, args...)
+	this.Sprint(LevelPanic, format, args...)
 	panic(Sprintf(format, args...))
 }
 
 // Error Log ERROR level message.
 func (this *Logger) Error(format interface{}, v ...interface{}) {
-	this.writeMsg(LevelError, format, v...)
+	this.Sprint(LevelError, format, v...)
 }
 func (this *Logger) Alert(format interface{}, args ...interface{}) {
-	this.writeMsg(LevelAlert, format, args...)
+	this.Sprint(LevelAlert, format, args...)
 }
 
 // Debug Log DEBUG level message.
 func (this *Logger) Debug(format interface{}, v ...interface{}) {
-	this.writeMsg(LevelDebug, format, v...)
+	this.Sprint(LevelDebug, format, v...)
 }
 
 // Trace Log TRAC level message.
 func (this *Logger) Trace(format interface{}, v ...interface{}) {
-	this.writeMsg(LevelTrace, format, v...)
+	this.Sprint(LevelTrace, format, v...)
 }
 
 // SetLevel 设置日志输出等级

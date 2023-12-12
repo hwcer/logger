@@ -27,7 +27,7 @@ func NewFile(path string) *File {
 
 type File struct {
 	file     *os.File
-	fileName fileNameFormatter     //
+	fileName fileNameFormatter     //日志名规则
 	logsPath string                //日志目录
 	Sprintf  func(*Message) string //格式化message
 }
@@ -81,6 +81,7 @@ func (this *File) Write(msg *Message) (err error) {
 func (this *File) timer() {
 	_ = this.mayCreateFile()
 }
+
 func (this *File) mayCreateFile() (err error) {
 	// Open the log file
 	defer func() {
@@ -106,13 +107,13 @@ func (this *File) mayCreateFile() (err error) {
 	if err != nil {
 		return err
 	}
+	fd.Fd()
 	_ = os.Chmod(path, os.FileMode(perm))
 	if err = fd.Sync(); err != nil {
 		return
 	}
 	var old *os.File
-	old, this.file = this.file, fd
-	if old != nil {
+	if old, this.file = this.file, fd; old != nil {
 		time.AfterFunc(5*time.Second, func() {
 			_ = old.Close()
 		})
