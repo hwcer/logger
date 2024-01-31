@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -15,10 +14,6 @@ func init() {
 	//if err := syscall.Dup2(int(f.Fd()), int(os.Stderr.Fd())); err != nil {
 	//	panic(err)
 	//}
-}
-
-func Default() *Logger {
-	return defaultLogger
 }
 
 func Fatal(f any, v ...any) {
@@ -58,12 +53,11 @@ func SetCallDepth(depth int) {
 }
 
 func SetOutput(name string, output Output) error {
-	if name == defaultConsoleName {
-		return errors.New("output name disable")
-	}
 	return defaultLogger.SetOutput(name, output)
 }
-
+func DelOutput(name string) {
+	defaultLogger.DelOutput(name)
+}
 func Sprintf(format any, args ...any) (text string) {
 	switch v := format.(type) {
 	case string:
