@@ -4,13 +4,13 @@ import (
 	"fmt"
 )
 
-const defaultConsoleName = "_defaultConsoleName"
+const DefaultConsoleName = "_default_console_name"
 
 var defaultLogger *Logger
 
 func init() {
 	defaultLogger = New(3)
-	_ = defaultLogger.SetOutput(defaultConsoleName, Console)
+	_ = defaultLogger.SetOutput(DefaultConsoleName, Console)
 	//if err := syscall.Dup2(int(f.Fd()), int(os.Stderr.Fd())); err != nil {
 	//	panic(err)
 	//}
