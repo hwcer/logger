@@ -20,7 +20,6 @@ type console struct {
 	sync.Mutex
 	Sprintf  func(*Message) string
 	colorful bool
-	Disabled bool //关闭控制台输出
 }
 
 func (c *console) Init() (err error) {
@@ -31,9 +30,6 @@ func (c *console) Init() (err error) {
 }
 
 func (c *console) Write(msg *Message) error {
-	if c.Disabled {
-		return nil
-	}
 	var txt string
 	level := msg.Level
 	if c.Sprintf != nil {
