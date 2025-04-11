@@ -51,11 +51,12 @@ func (l Level) Brush(text string) string {
 	}
 }
 
-type Interface interface {
-	Fatal(format any, args ...any) //终止程序运行
-	Panic(format any, args ...any) //抛出Panic
-	Error(format any, args ...any)
-	Alert(format any, args ...any)
-	Trace(format any, args ...any)
-	Debug(format any, args ...any)
-}
+//
+//type Interface interface {
+//	Fatal(format any, args ...any) //终止程序运行
+//	Panic(format any, args ...any) //抛出Panic
+//	Error(format any, args ...any)
+//	Alert(format any, args ...any)
+//	Trace(format any, args ...any)
+//	Debug(format any, args ...any)
+//}
