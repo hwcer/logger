@@ -1,10 +1,9 @@
 package logger
 
 import (
-	"os"
+	"fmt"
 	"runtime"
 	"strings"
-	"sync"
 )
 
 var Console = &console{colorful: true}
@@ -14,22 +13,24 @@ func init() {
 	Console.Sprintf = func(message *Message) string {
 		return message.Content
 	}
+	if runtime.GOOS == "windows" {
+		Console.colorful = false
+	}
 }
 
 type console struct {
-	sync.Mutex
+	Disable  bool
 	Sprintf  func(*Message) string
 	colorful bool
 }
 
-func (c *console) Init() (err error) {
-	if runtime.GOOS == "windows" {
-		c.colorful = false
-	}
-	return
+func (c *console) Name() string {
+	return "_logger_console_name"
 }
-
 func (c *console) Write(msg *Message) error {
+	if c.Disable {
+		return nil
+	}
 	var txt string
 	level := msg.Level
 	if c.Sprintf != nil {
@@ -43,12 +44,6 @@ func (c *console) Write(msg *Message) error {
 	if level >= LevelError {
 		txt = strings.Join([]string{txt, msg.Stack}, "\n")
 	}
-	return c.printlnConsole(txt)
-}
-
-func (c *console) printlnConsole(msg string) (err error) {
-	c.Lock()
-	defer c.Unlock()
-	_, err = os.Stdout.Write(append([]byte(msg), '\n'))
-	return
+	_, err := fmt.Println(txt)
+	return err
 }

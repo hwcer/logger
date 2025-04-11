@@ -6,16 +6,12 @@ import (
 
 // Output Output输出时是否对字体染色
 type Output interface {
-	Init() error
 	Write(message *Message) (err error)
 }
 
 func (this *Logger) SetOutput(name string, output Output) error {
 	if _, ok := this.outputs[name]; ok {
 		return fmt.Errorf("adapter name exist:%v", name)
-	}
-	if err := output.Init(); err != nil {
-		return err
 	}
 	this.mutex.Lock()
 	defer this.mutex.Unlock()

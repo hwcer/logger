@@ -4,64 +4,70 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/hwcer/logger/file"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
-type fileNameFormatter func() (name string, expire time.Duration)
-
-// DefaultFileNameFormatter 默认日志文件,每日一份
-func DefaultFileNameFormatter() (name string, expire time.Duration) {
-	t := time.Now()
-	r := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
-	name = t.Format("20060102")
-	expire = time.Duration(r.Unix()-t.Unix()) * time.Second
-	return
-}
-
 func NewFile(path string) *File {
-	return &File{logsPath: path}
+	f := &File{logsPath: path}
+	f.backup = file.NewBackup()
+	return f
 }
 
 type File struct {
-	file     *os.File
-	fileName fileNameFormatter     //日志名规则
+	limit    int64                 //文件大小(byte),0：不需要按容量切分
+	backup   *file.Backup          //备份锁
+	status   *file.Status          //文件状态
+	layout   string                //日期标记
+	fileName file.NameFormatter    //日志名规则
 	logsPath string                //日志目录
 	Sprintf  func(*Message) string //格式化message
 }
 
-func (this *File) GetFileName() (name string, expire time.Duration) {
+func (this *File) GetFileName() (name string, expire int64) {
 	if this.fileName != nil {
 		return this.fileName()
 	}
-	return DefaultFileNameFormatter()
+	return file.NameFormatterDefault()
+}
+
+func (this *File) MayBackup() error {
+	if this.mayNeedBackup() {
+		return this.backup.Handle(this.createFile)
+	}
+	return nil
+}
+
+// mayNeedBackup 是否需要开始备份
+func (this *File) mayNeedBackup() bool {
+	if this.status == nil {
+		return true
+	}
+	if this.limit > 0 && this.status.Size >= this.limit {
+		return true
+	}
+	if this.status.Expire > 0 && this.status.Expire < time.Now().Unix() {
+		return true
+	}
+	return false
+}
+
+// SetFileSize 设置文件大小(M)，默认无限制
+func (this *File) SetFileSize(n int64) {
+	this.limit = n * 1024 * 1024
 }
 
 // SetFileName 设置日志文件名,  前缀(string) 或者 fileNameFormatter
-func (this *File) SetFileName(f fileNameFormatter) {
+func (this *File) SetFileName(f file.NameFormatter) {
 	this.fileName = f
 }
 
-func (this *File) Init() (err error) {
-	f, err := os.Stat(this.logsPath)
-	if err != nil {
-		return err
-	}
-	if !f.IsDir() {
-		return fmt.Errorf("path not dir:%v", this.logsPath)
-	}
-	if err = this.mayCreateFile(); err != nil {
-		return
-	}
-	return
-}
-
 func (this *File) Write(msg *Message) (err error) {
-	if this.file == nil {
-		return errors.New("file handle empty")
-	}
 	b := bytes.Buffer{}
 	if this.Sprintf != nil {
 		b.WriteString(this.Sprintf(msg))
@@ -73,37 +79,55 @@ func (this *File) Write(msg *Message) (err error) {
 		b.WriteString(msg.Stack)
 		b.WriteString("\n")
 	}
-	_, err = b.WriteTo(this.file)
 	//_, err = this.file.Write([]byte(txt))
+	return this.write(&b)
+}
+
+var errFileStatusNil = errors.New("file status is nil")
+
+func (this *File) write(b *bytes.Buffer) (err error) {
+	if err = this.MayBackup(); err != nil {
+		return
+	}
+	status := this.status
+	if status == nil {
+		return errFileStatusNil
+	}
+	var n int64
+	if n, err = b.WriteTo(status.File); err == nil && n > 0 {
+		atomic.AddInt64(&status.Size, n)
+	}
 	return
 }
 
-func (this *File) timer() {
-	_ = this.mayCreateFile()
-}
-
-func (this *File) mayCreateFile() (err error) {
+func (this *File) createFile() (err error) {
 	// Open the log file
 	defer func() {
 		if e := recover(); e != nil {
 			err = fmt.Errorf("%v", e)
 		}
 	}()
-	name, expire := this.GetFileName()
-	defer func() {
-		time.AfterFunc(expire, this.timer)
-	}()
-
-	if this.file != nil && name == filepath.Base(this.file.Name()) {
-		return nil
+	var path string
+	if path, err = filepath.Abs(this.logsPath); err != nil {
+		return
 	}
+
+	if err = this.pathExists(path); err != nil {
+		return
+	}
+
+	if err = this.backupFile(); err != nil {
+		return
+	}
+
 	var perm int64
 	perm, err = strconv.ParseInt("0777", 8, 64)
 	if err != nil {
 		return
 	}
-	path := filepath.Join(this.logsPath, name)
-	fd, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
+	name, expire := this.GetFileName()
+
+	fd, err := os.OpenFile(filepath.Join(path, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
 	if err != nil {
 		return err
 	}
@@ -112,13 +136,34 @@ func (this *File) mayCreateFile() (err error) {
 	if err = fd.Sync(); err != nil {
 		return
 	}
-	var old *os.File
-	if old, this.file = this.file, fd; old != nil {
-		time.AfterFunc(5*time.Second, func() {
-			_ = old.Close()
-		})
-	}
+	this.status = file.NewStatus(fd, expire)
 	return
+}
+
+func (this *File) backupFile() (err error) {
+	if this.status == nil {
+		return nil
+	}
+	var status *file.Status
+	status, this.status = this.status, nil
+	_ = status.File.Close()
+	name := status.File.Name()
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(filepath.Base(name), ext)
+	path := filepath.Dir(name)
+	for i := 1; ; i++ {
+		s := strconv.Itoa(10000 + i)
+		s = strings.TrimPrefix(s, "1")
+		filename := filepath.Join(path, fmt.Sprintf("%s.%s%s", base, s, ext))
+		if !this.fileExists(filename) {
+			return os.Rename(name, filename)
+		}
+	}
+}
+
+func (this *File) fileExists(file string) bool {
+	_, err := os.Stat(file)
+	return !os.IsNotExist(err)
 }
 
 func (this *File) pathExists(path string) error {
