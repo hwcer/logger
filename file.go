@@ -20,13 +20,13 @@ func NewFile(path string) *File {
 }
 
 type File struct {
-	limit    int64                 //文件大小(byte),0：不需要按容量切分
-	backup   *file.Backup          //备份锁
-	status   *file.Status          //文件状态
-	layout   string                //日期标记
-	fileName file.NameFormatter    //日志名规则
-	logsPath string                //日志目录
-	Sprintf  func(*Message) string //格式化message
+	limit    int64                           //文件大小(byte),0：不需要按容量切分
+	backup   *file.Backup                    //备份锁
+	status   *file.Status                    //文件状态
+	layout   string                          //日期标记
+	fileName file.NameFormatter              //日志名规则
+	logsPath string                          //日志目录
+	Sprintf  func(*Message) *strings.Builder //格式化message
 }
 
 func (this *File) GetFileName() (name string, expire int64) {
@@ -68,24 +68,20 @@ func (this *File) SetFileName(f file.NameFormatter) {
 }
 
 func (this *File) Write(msg *Message) (err error) {
-	b := bytes.Buffer{}
+	var b *strings.Builder
 	if this.Sprintf != nil {
-		b.WriteString(this.Sprintf(msg))
+		b = this.Sprintf(msg)
 	} else {
-		b.WriteString(msg.String())
+		b = msg.Sprintf()
 	}
 	b.WriteString("\n")
-	if msg.Level >= LevelError {
-		b.WriteString(msg.Stack)
-		b.WriteString("\n")
-	}
 	//_, err = this.file.Write([]byte(txt))
-	return this.write(&b)
+	return this.write(b)
 }
 
 var errFileStatusNil = errors.New("file status is nil")
 
-func (this *File) write(b *bytes.Buffer) (err error) {
+func (this *File) write(b *strings.Builder) (err error) {
 	if err = this.MayBackup(); err != nil {
 		return
 	}
@@ -94,7 +90,8 @@ func (this *File) write(b *bytes.Buffer) (err error) {
 		return errFileStatusNil
 	}
 	var n int64
-	if n, err = b.WriteTo(status.File); err == nil && n > 0 {
+	sb := bytes.NewBuffer([]byte(b.String()))
+	if n, err = sb.WriteTo(status.File); err == nil && n > 0 {
 		atomic.AddInt64(&status.Size, n)
 	}
 	return

@@ -10,8 +10,10 @@ var Console = &console{colorful: true}
 
 func init() {
 	//简化默认控制台输出
-	Console.Sprintf = func(message *Message) string {
-		return message.Content
+	Console.Sprintf = func(message *Message) *strings.Builder {
+		b := strings.Builder{}
+		b.WriteString(message.Content)
+		return &b
 	}
 	if runtime.GOOS == "windows" {
 		Console.colorful = false
@@ -20,7 +22,7 @@ func init() {
 
 type console struct {
 	Disable  bool
-	Sprintf  func(*Message) string
+	Sprintf  func(*Message) *strings.Builder
 	colorful bool
 }
 
@@ -34,14 +36,14 @@ func (c *console) Write(msg *Message) error {
 	var txt string
 	level := msg.Level
 	if c.Sprintf != nil {
-		txt = c.Sprintf(msg)
+		txt = c.Sprintf(msg).String()
 	} else {
-		txt = msg.String()
+		txt = msg.Sprintf().String()
 	}
 	if c.colorful {
 		txt = level.Brush(txt)
 	}
-	if level >= LevelError {
+	if msg.Stack != "" {
 		txt = strings.Join([]string{txt, msg.Stack}, "\n")
 	}
 	_, err := fmt.Println(txt)

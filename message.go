@@ -15,7 +15,7 @@ type Message struct {
 	Content string
 }
 
-func (this *Message) String() string {
+func (this *Message) Sprintf() *strings.Builder {
 	b := strings.Builder{}
 	b.WriteString(this.Time.Format(defaultTimeLayout))
 	b.WriteString(" [")
@@ -26,6 +26,10 @@ func (this *Message) String() string {
 		b.WriteString(this.Path)
 		b.WriteString("] ")
 	}
+	if this.Stack != "" {
+		b.WriteString("\n")
+		b.WriteString(this.Stack)
+	}
 	b.WriteString(this.Content)
-	return b.String()
+	return &b
 }
