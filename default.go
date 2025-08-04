@@ -41,9 +41,9 @@ func SetLevel(level Level) {
 	defaultLogger.SetLevel(level)
 }
 
-// SetPathTrim 设置日志起始路径
-func SetPathTrim(trimPath ...string) {
-	defaultLogger.SetPathTrim(trimPath...)
+// SetFilePathFormatter 设置日志起始路径
+func SetFilePathFormatter(f filePathFormatter) {
+	defaultLogger.SetFilePathFormatter(f)
 }
 
 func SetCallDepth(depth int) {

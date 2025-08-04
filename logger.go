@@ -11,12 +11,15 @@ import (
 	"time"
 )
 
+type filePathFormatter func(string, int) string
+
 type Logger struct {
-	mutex     sync.Mutex
-	level     Level
-	usePath   []string
-	outputs   map[string]Output
-	callDepth int
+	mutex sync.Mutex
+	level Level
+	//usePath   []string
+	outputs           map[string]Output
+	callDepth         int
+	filePathFormatter filePathFormatter
 }
 
 func New(depth ...int) *Logger {
@@ -40,8 +43,7 @@ func (this *Logger) Write(msg *Message) {
 	}
 	if this.callDepth > 0 && msg.Path == "" {
 		if _, file, lineno, ok := runtime.Caller(this.callDepth); ok {
-			file = this.TrimPath(file)
-			msg.Path = strings.Replace(fmt.Sprintf("%s:%d", file, lineno), "%2e", ".", -1)
+			msg.Path = this.trimPath(file, lineno)
 		}
 	}
 	if msg.Level >= LevelError && msg.Stack == "" {
@@ -89,28 +91,28 @@ func (this *Logger) SetLevel(level Level) {
 	this.level = level
 }
 
-// SetPathTrim 设置日志起始路径
-func (this *Logger) SetPathTrim(trimPath ...string) {
-	for _, p := range trimPath {
-		this.usePath = append(this.usePath, filepath.ToSlash(p))
-	}
-}
-
 func (this *Logger) SetCallDepth(depth int) {
 	this.callDepth = depth
 }
 
-func (this *Logger) TrimPath(s string) (r string) {
-	if len(this.usePath) == 0 {
-		return s
+// SetFilePathFormatter 设置日志起始路径
+func (this *Logger) SetFilePathFormatter(f filePathFormatter) {
+	this.filePathFormatter = f
+}
+
+func (this *Logger) trimPath(fullPath string, lineno int) (r string) {
+	if this.filePathFormatter != nil {
+		return this.filePathFormatter(fullPath, lineno)
 	}
-	r = s
-	for _, p := range this.usePath {
-		arr := strings.SplitN(r, p, 2)
-		if len(arr) == 2 {
-			arr[0] = p
-			r = strings.Join(arr, "")
-		}
+	var filePath string
+	if i := strings.LastIndex(fullPath, ".com/"); i >= 0 {
+		filePath = fmt.Sprintf("%s:%d", fullPath[i+5:], lineno)
+	} else {
+		dir := filepath.Dir(fullPath)
+		pkg := filepath.Base(dir) // 包名
+		file := filepath.Base(fullPath)
+		filePath = fmt.Sprintf("%s/%s:%d", pkg, file, lineno)
 	}
-	return
+
+	return strings.Replace(filePath, "%2e", ".", -1)
 }
