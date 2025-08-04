@@ -6,7 +6,7 @@ import (
 
 // Output Output输出时是否对字体染色
 type Output interface {
-	Write(message *Message) (err error)
+	Write(message *Message)
 }
 
 func (this *Logger) SetOutput(name string, output Output) error {

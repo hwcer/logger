@@ -29,23 +29,26 @@ type console struct {
 func (c *console) Name() string {
 	return "_logger_console_name"
 }
-func (c *console) Write(msg *Message) error {
+
+func (c *console) Write(msg *Message) {
 	if c.Disable {
-		return nil
+		return
 	}
 	var txt string
 	level := msg.Level
+	var b *strings.Builder
 	if c.Sprintf != nil {
-		txt = c.Sprintf(msg).String()
+		b = c.Sprintf(msg)
 	} else {
-		txt = msg.Sprintf().String()
+		b = msg.Sprintf()
 	}
+	txt = b.String()
+
 	if c.colorful {
 		txt = level.Brush(txt)
 	}
 	if msg.Stack != "" {
 		txt = strings.Join([]string{txt, msg.Stack}, "\n")
 	}
-	_, err := fmt.Println(txt)
-	return err
+	_, _ = fmt.Println(txt)
 }

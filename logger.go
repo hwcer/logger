@@ -47,10 +47,8 @@ func (this *Logger) Write(msg *Message) {
 	if msg.Level >= LevelError && msg.Stack == "" {
 		msg.Stack = string(debug.Stack())
 	}
-	for name, output := range this.outputs {
-		if err := output.Write(msg); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to WriteMsg to adapter:%v,error:%v\n", name, err)
-		}
+	for _, output := range this.outputs {
+		output.Write(msg)
 	}
 }
 

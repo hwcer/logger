@@ -14,10 +14,6 @@ func TestFile(t *testing.T) {
 	f.SetFileSize(1)
 	_ = SetOutput("file", f)
 	SetLevel(LevelDebug)
-	if err := f.MayBackup(); err != nil {
-		t.Error(err)
-		return
-	}
 	wg.Add(1)
 	for i := 0; i < 100; i++ {
 		go testAlert()
