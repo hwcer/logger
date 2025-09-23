@@ -31,7 +31,7 @@ func New(depth ...int) *Logger {
 	return l
 }
 
-func (this *Logger) Write(msg *Message) {
+func (this *Logger) Write(msg *Message, stack ...string) {
 	defer func() {
 		_ = recover()
 	}()
@@ -46,44 +46,54 @@ func (this *Logger) Write(msg *Message) {
 			msg.Path = this.trimPath(file, lineno)
 		}
 	}
-	if msg.Level >= LevelError && msg.Stack == "" {
-		msg.Stack = string(debug.Stack())
+	if msg.Level >= LevelError {
+		if len(msg.Stack) > 0 {
+			msg.Stack = stack[0]
+		} else {
+			msg.Stack = string(debug.Stack())
+		}
 	}
 	for _, output := range this.outputs {
 		output.Write(msg)
 	}
 }
 
-func (this *Logger) Sprint(level Level, format any, args ...any) {
-	this.Write(&Message{Content: Sprintf(format, args...), Level: level})
+func (this *Logger) Sprint(level Level, content string, stack ...string) {
+	this.Write(&Message{Content: content, Level: level}, stack...)
 }
 
 func (this *Logger) Fatal(format any, args ...any) {
-	this.Sprint(LevelFATAL, format, args...)
+	content := Format(format, args...)
+	this.Sprint(LevelFATAL, content)
 	os.Exit(1)
 }
 
 func (this *Logger) Panic(format any, args ...any) {
-	this.Sprint(LevelPanic, format, args...)
-	panic(Sprintf(format, args...))
+	content := Format(format, args...)
+	this.Sprint(LevelPanic, content)
+	panic(Format(format, args...))
 }
 
 // Error Log ERROR level message.
-func (this *Logger) Error(format interface{}, v ...interface{}) {
-	this.Sprint(LevelError, format, v...)
+func (this *Logger) Error(format interface{}, args ...interface{}) {
+	content := Format(format, args...)
+	this.Sprint(LevelError, content)
 }
 func (this *Logger) Alert(format interface{}, args ...interface{}) {
-	this.Sprint(LevelAlert, format, args...)
+	content := Format(format, args...)
+	this.Sprint(LevelAlert, content)
 }
 
 // Debug Log DEBUG level message.
-func (this *Logger) Debug(format interface{}, v ...interface{}) {
-	this.Sprint(LevelDebug, format, v...)
+func (this *Logger) Debug(format interface{}, args ...interface{}) {
+	content := Format(format, args...)
+	this.Sprint(LevelDebug, content)
 }
 
 // Trace Log TRAC level message.
-func (this *Logger) Trace(format interface{}, v ...interface{}) {
-	this.Sprint(LevelTrace, format, v...)
+func (this *Logger) Trace(format interface{}, args ...interface{}) {
+	content := Format(format, args...)
+	this.Sprint(LevelTrace, content)
 }
 
 // SetLevel 设置日志输出等级

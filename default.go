@@ -9,11 +9,14 @@ var defaultLogger *Logger
 func init() {
 	defaultLogger = New(3)
 	_ = defaultLogger.SetOutput(Console.Name(), Console)
-	//if err := syscall.Dup2(int(f.Fd()), int(os.Stderr.Fd())); err != nil {
-	//	panic(err)
-	//}
 }
 
+func Write(msg *Message, stack ...string) {
+	defaultLogger.Write(msg, stack...)
+}
+func Sprint(level Level, content string, stack ...string) {
+	defaultLogger.Sprint(level, content, stack...)
+}
 func Fatal(f any, v ...any) {
 	defaultLogger.Fatal(f, v...)
 }
@@ -56,7 +59,7 @@ func SetOutput(name string, output Output) error {
 func DelOutput(name string) {
 	defaultLogger.DelOutput(name)
 }
-func Sprintf(format any, args ...any) (text string) {
+func Format(format any, args ...any) (text string) {
 	switch v := format.(type) {
 	case string:
 		text = v
