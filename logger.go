@@ -46,12 +46,8 @@ func (this *Logger) Write(msg *Message, stack ...string) {
 			msg.Path = this.trimPath(file, lineno)
 		}
 	}
-	if msg.Level >= LevelError {
-		if len(msg.Stack) > 0 {
-			msg.Stack = stack[0]
-		} else {
-			msg.Stack = string(debug.Stack())
-		}
+	if len(msg.Stack) > 0 {
+		msg.Stack = stack[0]
 	}
 	for _, output := range this.outputs {
 		output.Write(msg)
@@ -64,20 +60,20 @@ func (this *Logger) Sprint(level Level, content string, stack ...string) {
 
 func (this *Logger) Fatal(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelFATAL, content)
+	this.Sprint(LevelFATAL, content, string(debug.Stack()))
 	os.Exit(1)
 }
 
 func (this *Logger) Panic(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelPanic, content)
-	panic(Format(format, args...))
+	this.Sprint(LevelPanic, content, string(debug.Stack()))
+	panic(content)
 }
 
 // Error Log ERROR level message.
 func (this *Logger) Error(format interface{}, args ...interface{}) {
 	content := Format(format, args...)
-	this.Sprint(LevelError, content)
+	this.Sprint(LevelError, content, string(debug.Stack()))
 }
 func (this *Logger) Alert(format interface{}, args ...interface{}) {
 	content := Format(format, args...)
