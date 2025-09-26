@@ -11,13 +11,15 @@ import (
 	"time"
 )
 
+// 由Trae AI负责优化
+
 // fileSystem 封装文件系统相关字段，方便创建和还原
 
 type fileSystem struct {
 	file           *os.File      // 文件句柄
 	size           int64         // 当前大小
 	expire         int64         // 过期时间（按日期切分）
-	backup         string        // 备份名后缀   name.backup.index
+	backup         string        // 备份名后缀,为空时不会自动备份(比如name中已经包含了备份名,日期)   name.backup.index
 	bufferedWriter *bufio.Writer // 缓冲写入器
 }
 
@@ -45,7 +47,7 @@ func NewFile(path string, cap ...int) *File {
 	} else {
 		f.writer = make(chan *strings.Builder, 1000)
 	}
-
+	f.bufferFlushInterval = time.Second //默认一秒刷新一次
 	f.fileNameFormatter = FileNameFormatterDefault
 	f.wg.Add(1)
 	go f.process()
@@ -53,14 +55,15 @@ func NewFile(path string, cap ...int) *File {
 }
 
 type File struct {
-	wg                sync.WaitGroup                  //等待组，用于优雅关闭
-	fs                *fileSystem                     // 文件系统对象
-	path              string                          //日志目录
-	limit             int64                           //文件大小(byte),0：不需要按容量切分
-	index             int                             //备份文件后缀
-	Sprintf           func(*Message) *strings.Builder //格式化message
-	writer            chan *strings.Builder           //写通道
-	fileNameFormatter fileNameFormatter               //日志名规则
+	wg                  sync.WaitGroup                  //等待组，用于优雅关闭
+	fs                  *fileSystem                     // 文件系统对象
+	path                string                          //日志目录
+	limit               int64                           //文件大小(byte),0：不需要按容量切分
+	index               int                             //备份文件后缀
+	Sprintf             func(*Message) *strings.Builder //格式化message
+	writer              chan *strings.Builder           //写通道
+	fileNameFormatter   fileNameFormatter               //日志名规则
+	bufferFlushInterval time.Duration                   //缓冲区时间间隔
 }
 
 // SetFileSize 设置文件大小(M)，默认无限制
@@ -75,6 +78,15 @@ func (f *File) SetFileSize(n int64) {
 func (f *File) SetFileName(fileNameFormatterFunc fileNameFormatter) {
 	// fileName字段仅在初始化时设置，无需并发保护
 	f.fileNameFormatter = fileNameFormatterFunc
+}
+
+// SetFlushInterval 设置缓冲区刷新间隔
+// 注意：该方法可以在运行时调用，会在下一次定时器触发时生效
+func (f *File) SetFlushInterval(interval time.Duration) {
+	if interval <= 0 {
+		return // 不允许设置非正的刷新间隔
+	}
+	f.bufferFlushInterval = interval
 }
 
 func (f *File) Write(msg *Message) {
@@ -108,30 +120,34 @@ func (f *File) Close() error {
 func (f *File) process() {
 	defer f.wg.Done()
 	defer func() {
+		// 确保在退出前刷新缓冲区并释放资源
 		if f.fs != nil && f.fs.bufferedWriter != nil {
-			// 在关闭bufferedWriter前刷新缓冲区
 			_ = f.fs.bufferedWriter.Flush()
-			// 注意：关闭bufferedWriter时不需要单独关闭底层的os.File
-			// 因为当设置bufferedWriter为nil后，垃圾回收会处理底层资源
 			f.fs.bufferedWriter = nil
-			f.fs.file = nil // 同时将file设置为nil以避免重复关闭
+			f.fs.file = nil
 		}
 	}()
 
+	// 创建定时器并确保在函数退出时停止
+	timer := time.NewTimer(f.bufferFlushInterval)
+	defer timer.Stop()
+
 	// 持续处理writer通道中的消息，直到通道关闭
-	// 注意：writer通道的关闭信号已足够用于检测关闭事件
 	for {
-		b, ok := <-f.writer
-		if !ok {
-			// writer通道已关闭，处理完所有消息后退出
-			// defer函数会自动执行完整的资源清理
-			return
+		select {
+		case b, ok := <-f.writer:
+			if !ok {
+				return
+			}
+			f.writeFile(b)
+		case <-timer.C:
+			if f.mayNeedBackup() {
+				f.createFile()
+			} else if f.fs != nil && f.fs.bufferedWriter != nil {
+				_ = f.fs.bufferedWriter.Flush()
+			}
+			timer.Reset(f.bufferFlushInterval)
 		}
-		// 正常处理日志消息
-		if f.mayNeedBackup() {
-			_ = f.createFile()
-		}
-		f.writeFile(b)
 	}
 }
 
@@ -177,8 +193,9 @@ func (f *File) mayNeedBackup() bool {
 	return false
 }
 
-func (f *File) createFile() (err error) {
+func (f *File) createFile() {
 	// 所有操作都在同一个goroutine中，无需锁保护
+	var err error
 
 	// 保存旧的文件系统对象，用于失败时恢复
 	oldFS := f.fs
@@ -234,12 +251,11 @@ func (f *File) createFile() (err error) {
 
 	// 替换旧的文件系统对象
 	f.fs = newFS
-	return
 }
 
 // backupFile 使用静默方式，如果失败新的文件系统也只会继续使用当前文件
 func (f *File) backupFile(fs *fileSystem) {
-	if fs == nil {
+	if fs == nil || fs.backup == "" {
 		return
 	}
 	var err error
@@ -261,9 +277,8 @@ func (f *File) backupFile(fs *fileSystem) {
 	// 备份操作不需要修改f.fs，因为我们只在createFile中替换它
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(filepath.Base(name), ext)
-	if fs.backup != "" {
-		base = fmt.Sprintf("%s.%s", base, fs.backup)
-	}
+	base = fmt.Sprintf("%s.%s", base, fs.backup)
+
 	path := filepath.Dir(name)
 	for i := f.index + 1; ; i++ {
 		s := strconv.Itoa(10000 + i)
@@ -277,8 +292,6 @@ func (f *File) backupFile(fs *fileSystem) {
 			break
 		}
 	}
-
-	return
 }
 
 func (f *File) fileExists(file string) bool {
