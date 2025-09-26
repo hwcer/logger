@@ -23,8 +23,8 @@ type fileSystem struct {
 
 type fileNameFormatter func() (name, backup string, expire int64)
 
-// defaultFileNameFormatter 默认日志文件,每日一份
-func defaultFileNameFormatter() (name, backup string, expire int64) {
+// FileNameFormatterDefault 默认日志文件,每日一份
+func FileNameFormatterDefault() (name, backup string, expire int64) {
 	t := time.Now()
 	r := time.Date(t.Year(), t.Month(), 0, 0, 0, 0, 0, t.Location())
 	backup = t.Format("200601")
@@ -46,7 +46,7 @@ func NewFile(path string, cap ...int) *File {
 		f.writer = make(chan *strings.Builder, 1000)
 	}
 
-	f.fileNameFormatter = defaultFileNameFormatter
+	f.fileNameFormatter = FileNameFormatterDefault
 	f.wg.Add(1)
 	go f.process()
 	return f
@@ -129,7 +129,7 @@ func (f *File) process() {
 		}
 		// 正常处理日志消息
 		if f.mayNeedBackup() {
-			f.createFile()
+			_ = f.createFile()
 		}
 		f.writeFile(b)
 	}
