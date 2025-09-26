@@ -14,6 +14,10 @@ func init() {
 func Write(msg *Message, stack ...string) {
 	defaultLogger.Write(msg, stack...)
 }
+func Close() error {
+	return defaultLogger.Close()
+}
+
 func Sprint(level Level, content string, stack ...string) {
 	defaultLogger.Sprint(level, content, stack...)
 }
