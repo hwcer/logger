@@ -39,6 +39,14 @@ func Trace(f any, v ...any) {
 	defaultLogger.Trace(f, v...)
 }
 
+func Info(f any, v ...any) {
+	defaultLogger.Info(f, v...)
+}
+
+func Warn(f any, v ...any) {
+	defaultLogger.Warn(f, v...)
+}
+
 // SetLevel 设置日志输出等级
 func SetLevel(level Level) {
 	defaultLogger.SetLevel(level)

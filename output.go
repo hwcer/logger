@@ -7,34 +7,35 @@ import (
 // Output Output输出时是否对字体染色
 type Output interface {
 	Write(message *Message)
+	Close() error
 }
 
-func (this *Logger) SetOutput(name string, output Output) error {
-	if _, ok := this.outputs[name]; ok {
+func (log *Logger) SetOutput(name string, output Output) error {
+	if _, ok := log.outputs[name]; ok {
 		return fmt.Errorf("adapter name exist:%v", name)
 	}
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+	log.mutex.Lock()
+	defer log.mutex.Unlock()
 	dict := make(map[string]Output)
-	for k, v := range this.outputs {
+	for k, v := range log.outputs {
 		dict[k] = v
 	}
 	dict[name] = output
-	this.outputs = dict
+	log.outputs = dict
 	return nil
 }
 
-func (this *Logger) DelOutput(name string) {
-	if _, ok := this.outputs[name]; !ok {
+func (log *Logger) DelOutput(name string) {
+	if _, ok := log.outputs[name]; !ok {
 		return
 	}
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+	log.mutex.Lock()
+	defer log.mutex.Unlock()
 	dict := make(map[string]Output)
-	for k, v := range this.outputs {
+	for k, v := range log.outputs {
 		if k != name {
 			dict[k] = v
 		}
 	}
-	this.outputs = dict
+	log.outputs = dict
 }

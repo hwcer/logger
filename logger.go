@@ -14,12 +14,11 @@ import (
 type filePathFormatter func(string, int) string
 
 type Logger struct {
-	mutex sync.Mutex
-	level Level
-	//usePath   []string
+	level             Level
 	outputs           map[string]Output
 	callDepth         int
 	filePathFormatter filePathFormatter
+	mutex             sync.Mutex
 }
 
 func New(depth ...int) *Logger {
@@ -30,85 +29,113 @@ func New(depth ...int) *Logger {
 	l.callDepth = dep
 	return l
 }
-
-func (this *Logger) Write(msg *Message, stack ...string) {
+func (log *Logger) Close() error {
+	log.mutex.Lock()
+	defer log.mutex.Unlock()
+	var errs []error
+	remainingOutputs := map[string]Output{}
+	for k, output := range log.outputs {
+		if err := output.Close(); err != nil {
+			errs = append(errs, err)
+			remainingOutputs[k] = output
+		}
+	}
+	log.outputs = remainingOutputs
+	if len(errs) > 0 {
+		return fmt.Errorf("close logger error: %v", errs)
+	}
+	return nil
+}
+func (log *Logger) Write(msg *Message, stack ...string) {
 	defer func() {
 		_ = recover()
 	}()
-	if msg.Level < this.level {
+	if msg.Level < log.level {
 		return
 	}
 	if msg.Time.IsZero() {
 		msg.Time = time.Now()
 	}
-	if this.callDepth > 0 && msg.Path == "" {
-		if _, file, lineno, ok := runtime.Caller(this.callDepth); ok {
-			msg.Path = this.trimPath(file, lineno)
+	if log.callDepth > 0 && msg.Path == "" {
+		if _, file, lineno, ok := runtime.Caller(log.callDepth); ok {
+			msg.Path = log.trimPath(file, lineno)
 		}
 	}
 	if len(msg.Stack) > 0 {
 		msg.Stack = stack[0]
 	}
-	for _, output := range this.outputs {
+	for _, output := range log.outputs {
 		output.Write(msg)
 	}
 }
 
-func (this *Logger) Sprint(level Level, content string, stack ...string) {
-	this.Write(&Message{Content: content, Level: level}, stack...)
+func (log *Logger) Sprint(level Level, content string, stack ...string) {
+	log.Write(&Message{Content: content, Level: level}, stack...)
 }
 
-func (this *Logger) Fatal(format any, args ...any) {
+func (log *Logger) Fatal(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelFATAL, content, string(debug.Stack()))
+	log.Sprint(LevelFatal, content, string(debug.Stack()))
 	os.Exit(1)
 }
 
-func (this *Logger) Panic(format any, args ...any) {
+func (log *Logger) Panic(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelPanic, content, string(debug.Stack()))
+	log.Sprint(LevelPanic, content, string(debug.Stack()))
 	panic(content)
 }
 
 // Error Log ERROR level message.
-func (this *Logger) Error(format interface{}, args ...interface{}) {
+func (log *Logger) Error(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelError, content, string(debug.Stack()))
+	log.Sprint(LevelError, content, string(debug.Stack()))
 }
-func (this *Logger) Alert(format interface{}, args ...interface{}) {
+func (log *Logger) Alert(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelAlert, content)
+	log.Sprint(LevelAlert, content)
 }
 
 // Debug Log DEBUG level message.
-func (this *Logger) Debug(format interface{}, args ...interface{}) {
+func (log *Logger) Debug(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelDebug, content)
+	log.Sprint(LevelDebug, content)
 }
 
 // Trace Log TRAC level message.
-func (this *Logger) Trace(format interface{}, args ...interface{}) {
+func (log *Logger) Trace(format any, args ...any) {
 	content := Format(format, args...)
-	this.Sprint(LevelTrace, content)
+	log.Sprint(LevelTrace, content)
+}
+
+// Info Log INFO level message.
+func (log *Logger) Info(format any, args ...any) {
+	content := Format(format, args...)
+	log.Sprint(LevelInfo, content)
+}
+
+// Warn Log WARN level message.
+func (log *Logger) Warn(format any, args ...any) {
+	content := Format(format, args...)
+	log.Sprint(LevelWarn, content)
 }
 
 // SetLevel 设置日志输出等级
-func (this *Logger) SetLevel(level Level) {
-	this.level = level
+func (log *Logger) SetLevel(level Level) {
+	log.level = level
 }
 
-func (this *Logger) SetCallDepth(depth int) {
-	this.callDepth = depth
+func (log *Logger) SetCallDepth(depth int) {
+	log.callDepth = depth
 }
 
 // SetFilePathFormatter 设置日志起始路径
-func (this *Logger) SetFilePathFormatter(f filePathFormatter) {
-	this.filePathFormatter = f
+func (log *Logger) SetFilePathFormatter(f filePathFormatter) {
+	log.filePathFormatter = f
 }
 
-func (this *Logger) trimPath(fullPath string, lineno int) (r string) {
-	if this.filePathFormatter != nil {
-		return this.filePathFormatter(fullPath, lineno)
+func (log *Logger) trimPath(fullPath string, lineno int) (r string) {
+	if log.filePathFormatter != nil {
+		return log.filePathFormatter(fullPath, lineno)
 	}
 	var filePath string
 	if i := strings.LastIndex(fullPath, ".com/"); i >= 0 {

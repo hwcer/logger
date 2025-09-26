@@ -135,17 +135,10 @@ func (f *File) process() {
 	}
 }
 
-// 定义一个全局的回调函数变量，用于性能测试中监控日志处理
-var onLogProcessed func()
-
 func (f *File) writeFile(b *strings.Builder) {
 	defer func() {
 		if e := recover(); e != nil {
 			fmt.Printf("logger write file recover error:%v", e)
-		}
-		// 调用回调函数通知日志已处理
-		if onLogProcessed != nil {
-			onLogProcessed()
 		}
 	}()
 

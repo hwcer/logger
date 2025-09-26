@@ -29,7 +29,9 @@ type console struct {
 func (c *console) Name() string {
 	return "_logger_console_name"
 }
-
+func (c *console) Close() error {
+	return nil
+}
 func (c *console) Write(msg *Message) {
 	if c.Disable {
 		return
