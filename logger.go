@@ -61,7 +61,7 @@ func (log *Logger) Write(msg *Message, stack ...string) {
 			msg.Path = log.trimPath(file, lineno)
 		}
 	}
-	if len(msg.Stack) > 0 {
+	if len(stack) > 0 {
 		msg.Stack = stack[0]
 	}
 	for _, output := range log.outputs {
