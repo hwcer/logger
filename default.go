@@ -31,8 +31,17 @@ func Error(f any, v ...any) {
 	defaultLogger.Error(f, v...)
 }
 
+func Warn(f any, v ...any) {
+	defaultLogger.Warn(f, v...)
+}
+
+// Alert 兼容接口，等同于 Warn
 func Alert(f any, v ...any) {
-	defaultLogger.Alert(f, v...)
+	defaultLogger.Warn(f, v...)
+}
+
+func Info(f any, v ...any) {
+	defaultLogger.Info(f, v...)
 }
 
 func Debug(f any, v ...any) {
@@ -43,24 +52,12 @@ func Trace(f any, v ...any) {
 	defaultLogger.Trace(f, v...)
 }
 
-func Info(f any, v ...any) {
-	defaultLogger.Info(f, v...)
-}
-
-func Warn(f any, v ...any) {
-	defaultLogger.Warn(f, v...)
-}
-
-// SetLevel 设置日志输出等级
 func SetLevel(level Level) {
 	defaultLogger.SetLevel(level)
 }
-
-// SetFilePathFormatter 设置日志起始路径
-func SetFilePathFormatter(f filePathFormatter) {
-	defaultLogger.SetFilePathFormatter(f)
+func GetLevel() Level {
+	return defaultLogger.GetLevel()
 }
-
 func SetCallDepth(depth int) {
 	defaultLogger.SetCallDepth(depth)
 }
@@ -68,8 +65,8 @@ func SetCallDepth(depth int) {
 func SetOutput(name string, output Output) error {
 	return defaultLogger.SetOutput(name, output)
 }
-func DelOutput(name string) {
-	defaultLogger.DelOutput(name)
+func RemoveOutput(name string) {
+	defaultLogger.RemoveOutput(name)
 }
 func Format(format any, args ...any) (text string) {
 	switch v := format.(type) {

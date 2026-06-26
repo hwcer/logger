@@ -25,7 +25,7 @@ func (log *Logger) SetOutput(name string, output Output) error {
 	return nil
 }
 
-func (log *Logger) DelOutput(name string) {
+func (log *Logger) RemoveOutput(name string) {
 	if _, ok := log.outputs[name]; !ok {
 		return
 	}

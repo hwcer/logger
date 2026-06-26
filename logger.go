@@ -3,28 +3,23 @@ package logger
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 )
 
-type filePathFormatter func(string, int) string
-
 type Logger struct {
-	level             Level
-	outputs           map[string]Output
-	callDepth         int
-	filePathFormatter filePathFormatter
-	mutex             sync.Mutex
+	level     Level
+	outputs   map[string]Output
+	callDepth int
+	mutex     sync.Mutex
 }
 
 func New(depth ...int) *Logger {
 	dep := append(depth, 2)[0]
 	l := &Logger{}
-	l.level = LevelError
+	l.level = LevelTrace
 	l.outputs = map[string]Output{}
 	l.callDepth = dep
 	return l
@@ -56,11 +51,6 @@ func (log *Logger) Write(msg *Message, stack ...string) {
 	if msg.Time.IsZero() {
 		msg.Time = time.Now()
 	}
-	if log.callDepth > 0 && msg.Path == "" {
-		if _, file, lineno, ok := runtime.Caller(log.callDepth); ok {
-			msg.Path = log.trimPath(file, lineno)
-		}
-	}
 	if len(stack) > 0 {
 		msg.Stack = stack[0]
 	}
@@ -75,77 +65,65 @@ func (log *Logger) Sprint(level Level, content string, stack ...string) {
 
 func (log *Logger) Fatal(format any, args ...any) {
 	content := Format(format, args...)
-	log.Sprint(LevelFatal, content, string(debug.Stack()))
+	log.Sprint(LevelFatal, content, log.callerStack())
 	os.Exit(1)
 }
 
 func (log *Logger) Panic(format any, args ...any) {
 	content := Format(format, args...)
-	log.Sprint(LevelPanic, content, string(debug.Stack()))
+	log.Sprint(LevelPanic, content, log.callerStack())
 	panic(content)
 }
 
-// Error Log ERROR level message.
 func (log *Logger) Error(format any, args ...any) {
 	content := Format(format, args...)
-	log.Sprint(LevelError, content, string(debug.Stack()))
-}
-func (log *Logger) Alert(format any, args ...any) {
-	content := Format(format, args...)
-	log.Sprint(LevelAlert, content)
+	log.Sprint(LevelError, content, log.callerStack())
 }
 
-// Debug Log DEBUG level message.
-func (log *Logger) Debug(format any, args ...any) {
-	content := Format(format, args...)
-	log.Sprint(LevelDebug, content)
-}
-
-// Trace Log TRAC level message.
-func (log *Logger) Trace(format any, args ...any) {
-	content := Format(format, args...)
-	log.Sprint(LevelTrace, content)
-}
-
-// Info Log INFO level message.
-func (log *Logger) Info(format any, args ...any) {
-	content := Format(format, args...)
-	log.Sprint(LevelInfo, content)
-}
-
-// Warn Log WARN level message.
 func (log *Logger) Warn(format any, args ...any) {
 	content := Format(format, args...)
 	log.Sprint(LevelWarn, content)
 }
 
-// SetLevel 设置日志输出等级
+func (log *Logger) Info(format any, args ...any) {
+	content := Format(format, args...)
+	log.Sprint(LevelInfo, content)
+}
+
+func (log *Logger) Debug(format any, args ...any) {
+	content := Format(format, args...)
+	log.Sprint(LevelDebug, content)
+}
+
+func (log *Logger) Trace(format any, args ...any) {
+	content := Format(format, args...)
+	log.Sprint(LevelTrace, content)
+}
+
 func (log *Logger) SetLevel(level Level) {
 	log.level = level
 }
-
+func (log *Logger) GetLevel() Level {
+	return log.level
+}
 func (log *Logger) SetCallDepth(depth int) {
 	log.callDepth = depth
 }
 
-// SetFilePathFormatter 设置日志起始路径
-func (log *Logger) SetFilePathFormatter(f filePathFormatter) {
-	log.filePathFormatter = f
-}
-
-func (log *Logger) trimPath(fullPath string, lineno int) (r string) {
-	if log.filePathFormatter != nil {
-		return log.filePathFormatter(fullPath, lineno)
+func (log *Logger) callerStack() string {
+	var pcs [32]uintptr
+	n := runtime.Callers(log.callDepth+1, pcs[:])
+	if n == 0 {
+		return ""
 	}
-	var filePath string
-	if i := strings.LastIndex(fullPath, ".com/"); i >= 0 {
-		filePath = fmt.Sprintf("%s:%d", fullPath[i+5:], lineno)
-	} else {
-		dir := filepath.Dir(fullPath)
-		pkg := filepath.Base(dir) // 包名
-		file := filepath.Base(fullPath)
-		filePath = fmt.Sprintf("%s/%s:%d", pkg, file, lineno)
+	var b strings.Builder
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		_, _ = fmt.Fprintf(&b, "%s\n\t%s:%d\n", frame.Function, frame.File, frame.Line)
+		if !more {
+			break
+		}
 	}
-
-	return strings.Replace(filePath, "%2e", ".", -1)
+	return b.String()
 }

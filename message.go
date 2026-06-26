@@ -8,7 +8,6 @@ import (
 const defaultTimeLayout = "2006-01-02 15:04:05-0700" // 日志输出默认格式
 
 type Message struct {
-	Path    string
 	Time    time.Time
 	Level   Level
 	Stack   string
@@ -21,15 +20,6 @@ func (this *Message) Sprintf() *strings.Builder {
 	b.WriteString(" [")
 	b.WriteString(this.Level.String())
 	b.WriteString("] ")
-	if this.Path != "" {
-		b.WriteString("[")
-		b.WriteString(this.Path)
-		b.WriteString("] ")
-	}
-	if this.Stack != "" {
-		b.WriteString("\n")
-		b.WriteString(this.Stack)
-	}
 	b.WriteString(this.Content)
 	return &b
 }

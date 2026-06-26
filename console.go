@@ -9,12 +9,6 @@ import (
 var Console = &console{colorful: true}
 
 func init() {
-	//简化默认控制台输出
-	Console.Sprintf = func(message *Message) *strings.Builder {
-		b := strings.Builder{}
-		b.WriteString(message.Content)
-		return &b
-	}
 	if runtime.GOOS == "windows" {
 		Console.colorful = false
 	}
