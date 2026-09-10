@@ -44,7 +44,7 @@ func (c *console) Write(msg *Message) {
 		txt = level.Brush(txt)
 	}
 	if msg.Stack != "" {
-		txt = strings.Join([]string{txt, msg.Stack}, "\n")
+		txt = txt + "\n" + msg.Stack
 	}
 	_, _ = fmt.Println(txt)
 }

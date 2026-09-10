@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -17,7 +18,10 @@ type Logger struct {
 }
 
 func New(depth ...int) *Logger {
-	dep := append(depth, 2)[0]
+	dep := 2
+	if len(depth) > 0 {
+		dep = depth[0]
+	}
 	l := &Logger{}
 	l.level = LevelTrace
 	l.outputs = map[string]Output{}
@@ -36,10 +40,7 @@ func (log *Logger) Close() error {
 		}
 	}
 	log.outputs = remainingOutputs
-	if len(errs) > 0 {
-		return fmt.Errorf("close logger error: %v", errs)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 func (log *Logger) Write(msg *Message, stack ...string) {
 	defer func() {

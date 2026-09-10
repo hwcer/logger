@@ -16,19 +16,17 @@ func TestCloseConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	const goroutineCount = 100
 
-	for i := 0; i < goroutineCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range goroutineCount {
+		wg.Go(func() {
 			err := log.Close()
 			if err != nil {
 				t.Errorf("Close returned error: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
-	
+
 	// 验证再次调用Close不会导致panic或错误
 	err := log.Close()
 	if err != nil {
@@ -67,7 +65,7 @@ func TestRealWorldCloseScenario(t *testing.T) {
 
 	// 模拟应用程序中可能多次尝试关闭日志的情况
 	done := make(chan struct{})
-	
+
 	// 一个goroutine在某个时刻调用Close
 	go func() {
 		time.Sleep(10 * time.Millisecond)

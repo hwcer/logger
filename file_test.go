@@ -45,7 +45,7 @@ func TestFileWritePerformance(t *testing.T) {
 			var writeWg sync.WaitGroup
 
 			// 启动工作goroutine
-			for g := 0; g < goroutineCount; g++ {
+			for g := range goroutineCount {
 				writeWg.Add(1)
 				go func(goroutineID int) {
 					defer writeWg.Done()
@@ -58,15 +58,15 @@ func TestFileWritePerformance(t *testing.T) {
 					}
 
 					// 持续写入直到达到测试时间，每50毫秒写入一条，更接近实际业务场景
-				for time.Now().Before(endTime) {
-					f.Write(msg)
-					mutex.Lock()
-					counter++
-					mutex.Unlock()
-					
-					// 每50毫秒写入一条日志
-					time.Sleep(50 * time.Millisecond)
-				}
+					for time.Now().Before(endTime) {
+						f.Write(msg)
+						mutex.Lock()
+						counter++
+						mutex.Unlock()
+
+						// 每50毫秒写入一条日志
+						time.Sleep(50 * time.Millisecond)
+					}
 				}(g)
 			}
 

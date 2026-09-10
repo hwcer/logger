@@ -2,12 +2,14 @@ package logger
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,7 +49,7 @@ func NewFile(path string, cap ...int) *File {
 	} else {
 		f.writer = make(chan *strings.Builder, 1000)
 	}
-	f.bufferFlushInterval = time.Second //默认一秒刷新一次
+	f.bufferFlushInterval.Store(int64(time.Second)) //默认一秒刷新一次
 	f.fileNameFormatter = FileNameFormatterDefault
 	f.wg.Add(1)
 	go f.process()
@@ -63,7 +65,7 @@ type File struct {
 	Sprintf             func(*Message) *strings.Builder //格式化message
 	writer              chan *strings.Builder           //写通道
 	fileNameFormatter   fileNameFormatter               //日志名规则
-	bufferFlushInterval time.Duration                   //缓冲区时间间隔
+	bufferFlushInterval atomic.Int64                    //缓冲区时间间隔(允许运行时并发修改)
 }
 
 // SetFileSize 设置文件大小(M)，默认无限制
@@ -86,7 +88,7 @@ func (f *File) SetFlushInterval(interval time.Duration) {
 	if interval <= 0 {
 		return // 不允许设置非正的刷新间隔
 	}
-	f.bufferFlushInterval = interval
+	f.bufferFlushInterval.Store(int64(interval))
 }
 
 func (f *File) Write(msg *Message) {
@@ -129,7 +131,7 @@ func (f *File) process() {
 	}()
 
 	// 创建定时器并确保在函数退出时停止
-	timer := time.NewTimer(f.bufferFlushInterval)
+	timer := time.NewTimer(time.Duration(f.bufferFlushInterval.Load()))
 	defer timer.Stop()
 
 	// 持续处理writer通道中的消息，直到通道关闭
@@ -146,7 +148,7 @@ func (f *File) process() {
 			} else if f.fs != nil && f.fs.bufferedWriter != nil {
 				_ = f.fs.bufferedWriter.Flush()
 			}
-			timer.Reset(f.bufferFlushInterval)
+			timer.Reset(time.Duration(f.bufferFlushInterval.Load()))
 		}
 	}
 }
@@ -222,13 +224,7 @@ func (f *File) createFile() {
 	f.backupFile(oldFS)
 	oldFS = nil //备份后文件系统已经被释放不可以重新使用
 
-	var perm int64
-	perm, err = strconv.ParseInt("0777", 8, 64)
-	if err != nil {
-		return
-	}
-
-	fd, err := os.OpenFile(filepath.Join(path, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
+	fd, err := os.OpenFile(filepath.Join(path, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		return
 	}
@@ -280,15 +276,17 @@ func (f *File) backupFile(fs *fileSystem) {
 	base = fmt.Sprintf("%s.%s", base, fs.backup)
 
 	path := filepath.Dir(name)
-	for i := f.index + 1; ; i++ {
-		s := strconv.Itoa(10000 + i)
+	//最多尝试100个备份名,全部失败时放弃备份,原文件保持原名继续追加
+	for i := range 100 {
+		n := f.index + i + 1
+		s := strconv.Itoa(10000 + n)
 		s = strings.TrimPrefix(s, "1")
 		filename := filepath.Join(path, fmt.Sprintf("%s.%s%s", base, s, ext))
 		if f.fileExists(filename) {
 			continue
 		}
 		if err = os.Rename(name, filename); err == nil {
-			f.index = i
+			f.index = n
 			break
 		}
 	}
@@ -296,7 +294,7 @@ func (f *File) backupFile(fs *fileSystem) {
 
 func (f *File) fileExists(file string) bool {
 	_, err := os.Stat(file)
-	return !os.IsNotExist(err)
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 func (f *File) pathExists(path string) error {

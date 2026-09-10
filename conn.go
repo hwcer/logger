@@ -28,6 +28,8 @@ func (c *Conn) Name() string {
 }
 
 func (c *Conn) Init() error {
+	c.Lock()
+	defer c.Unlock()
 	if c.innerWriter != nil {
 		_ = c.innerWriter.Close()
 		c.innerWriter = nil
@@ -35,29 +37,32 @@ func (c *Conn) Init() error {
 	return nil
 }
 
-func (c *Conn) Write(msg *Message) (err error) {
+// Write 实现Output接口;连接状态与网络写入全程持锁,避免并发写与重复重连
+func (c *Conn) Write(msg *Message) {
+	c.Lock()
+	defer c.Unlock()
 	if c.needToConnectOnMsg() {
-		err = c.connect()
-		if err != nil {
+		if err := c.connect(); err != nil {
 			return
 		}
 		c.illNetFlag = false
 	}
-	//网络异常时，消息发出
 	if !c.illNetFlag {
-		err = c.println(msg)
-		//网络异常，通知处理网络的go程自动重连
-		if err != nil {
+		//网络异常时跳过写入;写入出错时置位illNetFlag等待下次重连
+		if err := c.println(msg); err != nil {
 			c.illNetFlag = true
 		}
 	}
-	return
 }
 
-func (c *Conn) Close() {
+func (c *Conn) Close() error {
+	c.Lock()
+	defer c.Unlock()
 	if c.innerWriter != nil {
 		_ = c.innerWriter.Close()
+		c.innerWriter = nil
 	}
+	return nil
 }
 
 func (c *Conn) connect() error {
@@ -65,8 +70,8 @@ func (c *Conn) connect() error {
 		_ = c.innerWriter.Close()
 		c.innerWriter = nil
 	}
-	addrs := strings.Split(c.Address, ";")
-	for _, addr := range addrs {
+	addrs := strings.SplitSeq(c.Address, ";")
+	for addr := range addrs {
 		conn, err := net.Dial(c.Network, addr)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "net.Dial error:%v\n", err)
@@ -100,9 +105,8 @@ func (c *Conn) needToConnectOnMsg() bool {
 	//return c.Options.ReconnectOnMsg
 }
 
+// println 写入一条日志,调用方必须已持有锁
 func (c *Conn) println(msg *Message) (err error) {
-	c.Lock()
-	defer c.Unlock()
 	var txt string
 	if c.Format != nil {
 		txt = c.Format(msg)
