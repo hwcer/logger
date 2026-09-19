@@ -7,14 +7,15 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Logger struct {
-	level     Level
-	outputs   map[string]Output
+	level     atomic.Int32                      //日志级别(Write 热路径无锁读,SetLevel 并发写)
+	outputs   atomic.Pointer[map[string]Output] //输出表 COW 快照(SetOutput/Close 写,Write 读)
 	callDepth int
-	mutex     sync.Mutex
+	mutex     sync.Mutex //仅串行化 outputs 的读-改-写
 }
 
 func New(depth ...int) *Logger {
@@ -23,8 +24,9 @@ func New(depth ...int) *Logger {
 		dep = depth[0]
 	}
 	l := &Logger{}
-	l.level = LevelTrace
-	l.outputs = map[string]Output{}
+	l.level.Store(int32(LevelTrace))
+	empty := map[string]Output{}
+	l.outputs.Store(&empty)
 	l.callDepth = dep
 	return l
 }
@@ -33,20 +35,20 @@ func (log *Logger) Close() error {
 	defer log.mutex.Unlock()
 	var errs []error
 	remainingOutputs := map[string]Output{}
-	for k, output := range log.outputs {
+	for k, output := range *log.outputs.Load() {
 		if err := output.Close(); err != nil {
 			errs = append(errs, err)
 			remainingOutputs[k] = output
 		}
 	}
-	log.outputs = remainingOutputs
+	log.outputs.Store(&remainingOutputs)
 	return errors.Join(errs...)
 }
 func (log *Logger) Write(msg *Message, stack ...string) {
 	defer func() {
 		_ = recover()
 	}()
-	if msg.Level < log.level {
+	if int32(msg.Level) < log.level.Load() {
 		return
 	}
 	if msg.Time.IsZero() {
@@ -55,7 +57,7 @@ func (log *Logger) Write(msg *Message, stack ...string) {
 	if len(stack) > 0 {
 		msg.Stack = stack[0]
 	}
-	for _, output := range log.outputs {
+	for _, output := range *log.outputs.Load() {
 		output.Write(msg)
 	}
 }
@@ -102,10 +104,10 @@ func (log *Logger) Trace(format any, args ...any) {
 }
 
 func (log *Logger) SetLevel(level Level) {
-	log.level = level
+	log.level.Store(int32(level))
 }
 func (log *Logger) GetLevel() Level {
-	return log.level
+	return Level(log.level.Load())
 }
 func (log *Logger) SetCallDepth(depth int) {
 	log.callDepth = depth

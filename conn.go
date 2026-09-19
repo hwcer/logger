@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 func NewConn(network, address string) *Conn {
@@ -20,7 +21,8 @@ type Conn struct {
 	Reconnect   bool   `json:"reconnect"`
 	Format      func(*Message) string
 	innerWriter io.WriteCloser
-	illNetFlag  bool //网络异常标记
+	illNetFlag  bool      //网络异常标记
+	nextDial    time.Time //下次允许拨号时刻:失败退避,避免日志服务宕机期间每条日志都拨号
 }
 
 func (c *Conn) Name() string {
@@ -70,9 +72,15 @@ func (c *Conn) connect() error {
 		_ = c.innerWriter.Close()
 		c.innerWriter = nil
 	}
+	if time.Now().Before(c.nextDial) {
+		//退避窗口内直接放弃:日志服务不可达时每条日志都在锁内拨号(无 deadline 可达
+		//数十秒)会串行阻塞所有打日志的业务协程
+		return fmt.Errorf("dial backoff window, skip reconnect:%v", c.Address)
+	}
 	addrs := strings.SplitSeq(c.Address, ";")
 	for addr := range addrs {
-		conn, err := net.Dial(c.Network, addr)
+		//无 deadline 的 Dial 在网络分区时可达数十秒,必须设上限
+		conn, err := net.DialTimeout(c.Network, addr, dialTimeout)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "net.Dial error:%v\n", err)
 			continue
@@ -85,8 +93,15 @@ func (c *Conn) connect() error {
 		c.innerWriter = conn
 		return nil
 	}
+	c.nextDial = time.Now().Add(dialBackoff) //全部地址失败,进入退避窗口
 	return fmt.Errorf("hava no valid logs service addr:%v", c.Address)
 }
+
+// 拨号参数:单次拨号上限与失败退避窗口(日志属尽力而为的输出,不堵业务)
+const (
+	dialTimeout = 3 * time.Second
+	dialBackoff = 5 * time.Second
+)
 
 func (c *Conn) needToConnectOnMsg() bool {
 	if c.Reconnect {
