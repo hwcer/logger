@@ -51,6 +51,10 @@ func NewFile(path string, cap ...int) *File {
 	}
 	f.bufferFlushInterval.Store(int64(time.Second)) //默认一秒刷新一次
 	f.fileNameFormatter = FileNameFormatterDefault
+	//启动即同步建文件:此前 f.fs 要等第一个刷新周期(默认1s)的定时器才创建,
+	//期间 writeFile 判空直接丢弃——进程启动最前面的日志(往往含启动关键信息)无痕丢失。
+	//此时 process 协程尚未启动,无并发;失败时 fs 保持 nil,后续每个定时周期自动重试
+	f.createFile()
 	f.wg.Add(1)
 	go f.process()
 	return f
@@ -66,6 +70,7 @@ type File struct {
 	writer              chan *strings.Builder           //写通道
 	fileNameFormatter   fileNameFormatter               //日志名规则
 	bufferFlushInterval atomic.Int64                    //缓冲区时间间隔(允许运行时并发修改)
+	mu                  sync.Mutex                      //串行化 fs/缓冲写访问:process 协程与 Fatal/Panic 同步落盘路径共享
 }
 
 // SetFileSize 设置文件大小(M)，默认无限制
@@ -101,8 +106,32 @@ func (f *File) Write(msg *Message) {
 	}
 	b.WriteString("\n")
 
+	//Fatal/Panic 同步落盘:调用方随后通常 os.Exit(进程终止),走缓冲通道大概率
+	//来不及被 process 协程消费,4MB bufio 也未 flush——最不能丢的日志反而必丢。
+	//同步写+立即 Flush,不再入队(避免 process 侧重复落盘)
+	if msg.Level >= LevelPanic {
+		f.writeSync(b)
+		return
+	}
+
 	// 阻塞模式写入，确保所有日志都能被处理
 	f.writer <- b
+}
+
+// writeSync Fatal/Panic 专用:绕过缓冲通道直接写文件并立即 Flush
+func (f *File) writeSync(b *strings.Builder) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fs == nil || f.fs.bufferedWriter == nil {
+		return
+	}
+	n, err := f.fs.bufferedWriter.WriteString(b.String())
+	if err != nil {
+		fmt.Printf("logger write file sync error:%v", err)
+		return
+	}
+	f.fs.size += int64(n)
+	_ = f.fs.bufferedWriter.Flush()
 }
 
 // Close 优雅关闭日志文件
@@ -123,11 +152,18 @@ func (f *File) process() {
 	defer f.wg.Done()
 	defer func() {
 		// 确保在退出前刷新缓冲区并释放资源
-		if f.fs != nil && f.fs.bufferedWriter != nil {
-			_ = f.fs.bufferedWriter.Flush()
+		f.mu.Lock()
+		if f.fs != nil {
+			if f.fs.bufferedWriter != nil {
+				_ = f.fs.bufferedWriter.Flush()
+			}
+			if f.fs.file != nil {
+				_ = f.fs.file.Close() //旧实现只 flush 不 Close,文件句柄泄漏(Windows 下还会锁住文件)
+			}
 			f.fs.bufferedWriter = nil
 			f.fs.file = nil
 		}
+		f.mu.Unlock()
 	}()
 
 	// 创建定时器并确保在函数退出时停止
@@ -143,11 +179,13 @@ func (f *File) process() {
 			}
 			f.writeFile(b)
 		case <-timer.C:
+			f.mu.Lock()
 			if f.mayNeedBackup() {
 				f.createFile()
 			} else if f.fs != nil && f.fs.bufferedWriter != nil {
 				_ = f.fs.bufferedWriter.Flush()
 			}
+			f.mu.Unlock()
 			timer.Reset(time.Duration(f.bufferFlushInterval.Load()))
 		}
 	}
@@ -159,6 +197,9 @@ func (f *File) writeFile(b *strings.Builder) {
 			fmt.Printf("logger write file recover error:%v", e)
 		}
 	}()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if f.fs == nil || f.fs.bufferedWriter == nil {
 		return
@@ -199,15 +240,13 @@ func (f *File) createFile() {
 	// 所有操作都在同一个goroutine中，无需锁保护
 	var err error
 
-	// 保存旧的文件系统对象，用于失败时恢复
+	// 保存旧的文件系统对象，用于备份
 	oldFS := f.fs
 	defer func() {
 		if err != nil {
-			fmt.Printf("logger create file recover error:%v", err)
-			// 如果没有旧文件系统，则触发panic
-			if oldFS == nil {
-				panic(fmt.Sprintf("critical error: cannot initialize log file system, %v", err))
-			}
+			//创建失败降级为 stderr 告警 + 每个定时周期重试,不 panic——
+			//目录不存在/EMFILE/权限变更等错误不该把整个进程打崩(旧实现 oldFS==nil 时 panic)
+			fmt.Printf("logger create file error:%v\n", err)
 		}
 	}()
 	// 确保在尝试创建新文件前，先保存备份相关信息
@@ -216,7 +255,8 @@ func (f *File) createFile() {
 	if err != nil {
 		return
 	}
-	if err = f.pathExists(path); err != nil {
+	//目录不存在时自动创建(常见运维失误:没建日志目录);存在但不是目录仍失败
+	if err = f.ensurePath(path); err != nil {
 		return
 	}
 
@@ -235,6 +275,7 @@ func (f *File) createFile() {
 		_ = fd.Close()
 		return
 	}
+	err = nil
 
 	// 新文件创建成功，创建新的文件系统对象
 	newFS := &fileSystem{
@@ -297,13 +338,17 @@ func (f *File) fileExists(file string) bool {
 	return !errors.Is(err, os.ErrNotExist)
 }
 
-func (f *File) pathExists(path string) error {
+// ensurePath 日志目录存在(或是自动创建)时返回 nil;路径被文件占用时报错
+func (f *File) ensurePath(path string) error {
 	stat, err := os.Stat(path)
-	if err != nil {
+	if err == nil {
+		if !stat.IsDir() {
+			return fmt.Errorf("path not dir:%v", path)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if !stat.IsDir() {
-		return fmt.Errorf("path not dir:%v", path)
-	}
-	return nil
+	return os.MkdirAll(path, 0777)
 }
