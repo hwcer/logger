@@ -14,24 +14,22 @@ type Output interface {
 func (log *Logger) SetOutput(name string, output Output) error {
 	log.mutex.Lock()
 	defer log.mutex.Unlock()
-	cur := *log.outputs.Load()
-	if _, ok := cur[name]; ok {
+	if _, ok := log.outputs[name]; ok {
 		return fmt.Errorf("adapter name exist:%v", name)
 	}
-	dict := maps.Clone(cur)
+	dict := maps.Clone(log.outputs)
 	dict[name] = output
-	log.outputs.Store(&dict)
+	log.outputs = dict
 	return nil
 }
 
 func (log *Logger) RemoveOutput(name string) {
 	log.mutex.Lock()
 	defer log.mutex.Unlock()
-	cur := *log.outputs.Load()
-	if _, ok := cur[name]; !ok {
+	if _, ok := log.outputs[name]; !ok {
 		return
 	}
-	dict := maps.Clone(cur)
+	dict := maps.Clone(log.outputs)
 	delete(dict, name)
-	log.outputs.Store(&dict)
+	log.outputs = dict
 }

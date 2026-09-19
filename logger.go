@@ -7,15 +7,14 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 type Logger struct {
-	level     atomic.Int32                      //日志级别(Write 热路径无锁读,SetLevel 并发写)
-	outputs   atomic.Pointer[map[string]Output] //输出表 COW 快照(SetOutput/Close 写,Write 读)
+	level     Level
+	outputs   map[string]Output
 	callDepth int
-	mutex     sync.Mutex //仅串行化 outputs 的读-改-写
+	mutex     sync.Mutex //仅串行化 SetOutput/RemoveOutput/Close 的读-改-写(写侧 COW,换引用不改底表)
 }
 
 func New(depth ...int) *Logger {
@@ -24,9 +23,8 @@ func New(depth ...int) *Logger {
 		dep = depth[0]
 	}
 	l := &Logger{}
-	l.level.Store(int32(LevelTrace))
-	empty := map[string]Output{}
-	l.outputs.Store(&empty)
+	l.level = LevelTrace
+	l.outputs = map[string]Output{}
 	l.callDepth = dep
 	return l
 }
@@ -35,20 +33,20 @@ func (log *Logger) Close() error {
 	defer log.mutex.Unlock()
 	var errs []error
 	remainingOutputs := map[string]Output{}
-	for k, output := range *log.outputs.Load() {
+	for k, output := range log.outputs {
 		if err := output.Close(); err != nil {
 			errs = append(errs, err)
 			remainingOutputs[k] = output
 		}
 	}
-	log.outputs.Store(&remainingOutputs)
+	log.outputs = remainingOutputs
 	return errors.Join(errs...)
 }
 func (log *Logger) Write(msg *Message, stack ...string) {
 	defer func() {
 		_ = recover()
 	}()
-	if int32(msg.Level) < log.level.Load() {
+	if msg.Level < log.level {
 		return
 	}
 	if msg.Time.IsZero() {
@@ -57,7 +55,10 @@ func (log *Logger) Write(msg *Message, stack ...string) {
 	if len(stack) > 0 {
 		msg.Stack = stack[0]
 	}
-	for _, output := range *log.outputs.Load() {
+	// outputs/level 仅初始化期配置,运行期 SetOutput/SetLevel 与此读的竞争
+	// 后果可接受:写侧 COW 保证 map 不损坏,最坏向已 Close 的输出写一条
+	// 被 recover 吞掉——日志库不得为配置期写入拖累打日志的热路径
+	for _, output := range log.outputs {
 		output.Write(msg)
 	}
 }
@@ -104,10 +105,10 @@ func (log *Logger) Trace(format any, args ...any) {
 }
 
 func (log *Logger) SetLevel(level Level) {
-	log.level.Store(int32(level))
+	log.level = level
 }
 func (log *Logger) GetLevel() Level {
-	return Level(log.level.Load())
+	return log.level
 }
 func (log *Logger) SetCallDepth(depth int) {
 	log.callDepth = depth
