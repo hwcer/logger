@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync/atomic"
 )
 
 var Console = &console{colorful: true}
@@ -15,7 +16,10 @@ func init() {
 }
 
 type console struct {
-	Disable  bool
+	// Disable 运行期可安全切换(cosgo SIGHUP 关控制台):atomic 保证与 Write 的
+	// 并发读无 data race。行级原子性由 fmt.Println 的单次 write syscall 提供,
+	// 行序不确定是无锁输出的固有属性
+	Disable  atomic.Bool
 	Sprintf  func(*Message) *strings.Builder
 	colorful bool
 }
@@ -27,7 +31,7 @@ func (c *console) Close() error {
 	return nil
 }
 func (c *console) Write(msg *Message) {
-	if c.Disable {
+	if c.Disable.Load() {
 		return
 	}
 	var txt string

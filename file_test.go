@@ -11,7 +11,7 @@ import (
 // TestFileWritePerformance 测试File日志器在不同并发量下的写入性能
 func TestFileWritePerformance(t *testing.T) {
 	// 禁用控制台输出以避免影响性能测试结果
-	Console.Disable = true
+	Console.Disable.Store(true)
 
 	// 创建日志目录
 	logDir := "./logs_perf"

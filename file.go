@@ -118,11 +118,20 @@ func (f *File) Write(msg *Message) {
 	f.writer <- b
 }
 
-// writeSync Fatal/Panic 专用:绕过缓冲通道直接写文件并立即 Flush
+// writeSync Fatal/Panic 专用:绕过缓冲通道直接写文件并立即 Flush。
+//
+// ⚠️ mu 的竞争面说明(为什么正常路径不心疼它):writeFile 仅由 process 单协程调用,
+// 正常流量下 mu 无竞争(uncontended mutex ~20ns);唯一对手是本函数,而它只在
+// Fatal/Panic 时出现。锁保护的是"process vs 直写路径"共享的 bufio——通道只管
+// 投递,管不到绕过通道的旁路。持锁 Flush 的磁盘 syscall 会短暂停顿管道,
+// 换来"Panic 日志严格排在既有异步日志之后"的顺序语义,值得。
 func (f *File) writeSync(b *strings.Builder) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fs == nil || f.fs.bufferedWriter == nil {
+		//🔴 启动建文件失败期间(目录不可写/EMFILE)来的 Fatal/Panic 也不能无痕消失:
+		//降级 stderr,与 createFile 失败时的策略一致
+		fmt.Fprint(os.Stderr, b.String())
 		return
 	}
 	n, err := f.fs.bufferedWriter.WriteString(b.String())
@@ -131,7 +140,10 @@ func (f *File) writeSync(b *strings.Builder) {
 		return
 	}
 	f.fs.size += int64(n)
-	_ = f.fs.bufferedWriter.Flush()
+	//Fatal 是最不能丢的日志,Flush 失败必须可见:盘满/句柄失效时静默=日志无痕丢失
+	if err = f.fs.bufferedWriter.Flush(); err != nil {
+		fmt.Printf("logger flush on fatal error:%v", err)
+	}
 }
 
 // Close 优雅关闭日志文件
@@ -206,7 +218,9 @@ func (f *File) writeFile(b *strings.Builder) {
 	}
 
 	// 直接写入缓冲写入器，避免不必要的转换
-	if n, err := f.fs.bufferedWriter.WriteString(b.String()); err != nil && n > 0 {
+	// 出错一律可见并跳过记账(部分写入的字节宁可少记——mayNeedBackup 只会因此
+	// 提前切分,不会漏切)
+	if n, err := f.fs.bufferedWriter.WriteString(b.String()); err != nil {
 		fmt.Printf("logger write file WriteString error:%v", err)
 	} else if n > 0 {
 		f.fs.size += int64(n)
@@ -350,5 +364,5 @@ func (f *File) ensurePath(path string) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.MkdirAll(path, 0777)
+	return os.MkdirAll(path, 0755) //0777 在 umask=0 的容器里是全局可写目录
 }
