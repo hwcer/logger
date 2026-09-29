@@ -51,10 +51,10 @@ func NewFile(path string, cap ...int) *File {
 	}
 	f.bufferFlushInterval.Store(int64(time.Second)) //默认一秒刷新一次
 	f.fileNameFormatter = FileNameFormatterDefault
-	//启动即同步建文件:此前 f.fs 要等第一个刷新周期(默认1s)的定时器才创建,
-	//期间 writeFile 判空直接丢弃——进程启动最前面的日志(往往含启动关键信息)无痕丢失。
-	//此时 process 协程尚未启动,无并发;失败时 fs 保持 nil,后续每个定时周期自动重试
-	f.createFile()
+	//🔴 文件**惰性创建**,不在构造期建:调用方(NewFile 之后、注册为输出之前)通常还要
+	//SetFileName/SetFileSize,此刻建只能用默认名——曾因此每个进程都先建出一个 log.log,
+	//而换名要等默认 expire(下月1号)才生效,整月日志全落在误名文件里。
+	//第一条日志到达时(writeFile/writeSync 惰性建)formatter 早已就位,启动日志一条不丢
 	f.wg.Add(1)
 	go f.process()
 	return f
@@ -80,11 +80,31 @@ func (f *File) SetFileSize(n int64) {
 	f.limit = n * 1024 * 1024
 }
 
-// SetFileName 设置日志文件名,  前缀(string) 或者 fileNameFormatter
-// 注意：该方法只应在初始化时调用
+// SetFileName 设置日志文件名规则。
+// 文件惰性创建后,常规时序(先 SetFileName 再有日志)根本不会产生误名文件;
+// 这里仍保留同步轮转,兜住"已按默认名写过日志后才改名"的时序:发现当前打开的
+// 文件名与新规则不符时 flush+关闭(空文件直接删除),再按新规则重建。
+// 须持 mu——process 协程可能已在写。
 func (f *File) SetFileName(fileNameFormatterFunc fileNameFormatter) {
-	// fileName字段仅在初始化时设置，无需并发保护
 	f.fileNameFormatter = fileNameFormatterFunc
+	name, _, _ := fileNameFormatterFunc()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fs == nil || f.fs.file == nil {
+		return
+	}
+	if filepath.Base(f.fs.file.Name()) == name {
+		return
+	}
+	_ = f.fs.bufferedWriter.Flush()
+	size := f.fs.size
+	oldName := f.fs.file.Name()
+	_ = f.fs.file.Close()
+	f.fs = nil
+	if size == 0 {
+		_ = os.Remove(oldName) //默认名误建的空文件,清掉免得目录里留 log.log 尸体
+	}
+	f.createFile()
 }
 
 // SetFlushInterval 设置缓冲区刷新间隔
@@ -129,10 +149,13 @@ func (f *File) writeSync(b *strings.Builder) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fs == nil || f.fs.bufferedWriter == nil {
-		//🔴 启动建文件失败期间(目录不可写/EMFILE)来的 Fatal/Panic 也不能无痕消失:
-		//降级 stderr,与 createFile 失败时的策略一致
-		fmt.Fprint(os.Stderr, b.String())
-		return
+		f.createFile() //惰性建:首条日志到达,formatter 已被调用方设置完毕
+		if f.fs == nil || f.fs.bufferedWriter == nil {
+			//🔴 建文件失败期间(目录不可写/EMFILE)来的 Fatal/Panic 也不能无痕消失:
+			//降级 stderr,与 createFile 失败时的策略一致
+			fmt.Fprint(os.Stderr, b.String())
+			return
+		}
 	}
 	n, err := f.fs.bufferedWriter.WriteString(b.String())
 	if err != nil {
@@ -192,9 +215,11 @@ func (f *File) process() {
 			f.writeFile(b)
 		case <-timer.C:
 			f.mu.Lock()
-			if f.mayNeedBackup() {
+			if f.fs == nil {
+				//还没写过日志,不空建文件(写入路径会惰性建);此前预建正是 log.log 误名的来源
+			} else if f.mayNeedBackup() {
 				f.createFile()
-			} else if f.fs != nil && f.fs.bufferedWriter != nil {
+			} else if f.fs.bufferedWriter != nil {
 				_ = f.fs.bufferedWriter.Flush()
 			}
 			f.mu.Unlock()
@@ -214,7 +239,10 @@ func (f *File) writeFile(b *strings.Builder) {
 	defer f.mu.Unlock()
 
 	if f.fs == nil || f.fs.bufferedWriter == nil {
-		return
+		f.createFile() //惰性建:首条日志到达,formatter 已被调用方设置完毕
+		if f.fs == nil || f.fs.bufferedWriter == nil {
+			return
+		}
 	}
 
 	// 直接写入缓冲写入器，避免不必要的转换
@@ -251,7 +279,7 @@ func (f *File) mayNeedBackup() bool {
 }
 
 func (f *File) createFile() {
-	// 所有操作都在同一个goroutine中，无需锁保护
+	// process 协程与 SetFileName 的同步轮转都会调到这里,两者均已持有 f.mu
 	var err error
 
 	// 保存旧的文件系统对象，用于备份

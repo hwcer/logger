@@ -3,6 +3,8 @@ package logger
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,5 +90,27 @@ func TestFileWritePerformance(t *testing.T) {
 			t.Logf("- Test duration: %.2f seconds", actualDuration.Seconds())
 			t.Logf("- Estimated writes per second: %.2f", writesPerSecond)
 		})
+	}
+}
+
+// 🔴 回归:文件惰性创建 + SetFileName 换名。
+// 曾因 NewFile 启动即按默认名建 log.log,换名要等默认 expire(下月1号),整月日志
+// 落在误名文件——现在 NewFile 不建文件,常规时序(先 SetFileName 再写日志)
+// 直接按正确名建,log.log 从源头不存在。
+func TestSetFileNameRotatesImmediately(t *testing.T) {
+	dir := t.TempDir()
+	f := NewFile(dir)
+	defer f.Close()
+	f.SetFileName(func() (name, backup string, expire int64) {
+		return "myapp.log", "", 0
+	})
+	f.Write(&Message{Level: LevelFatal, Content: "hello"}) //Fatal 走同步落盘路径,断言无需等待
+
+	if _, err := os.Stat(filepath.Join(dir, "log.log")); !os.IsNotExist(err) {
+		t.Fatal("默认名 log.log 不应存在(惰性创建,写入时 formatter 已就位)")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "myapp.log"))
+	if err != nil || !strings.Contains(string(b), "hello") {
+		t.Fatalf("日志必须直接写入新名文件:%v", err)
 	}
 }
